@@ -1,0 +1,112 @@
+---
+description: Track1 スコア改善ワークフロー（評価分析・instruction 正規化・学習・提出）
+globs: examples/smolvla_libero_spatial_lora_local/**,submission_template/smolvla_mypolicy.py,submission_template/policy_server.py,results/*.json,compe/t1/**
+alwaysApply: false
+---
+
+# Track 1 スコア改善ワークフロー
+
+Track 1 評価後の分析・改善は **この順序** で行う。`results/*.json` の `success_rate` と `collision_rate` を必ずタスク別に確認する。
+
+## 1. 結果の読み方
+
+| パターン | 解釈 | 優先対策 |
+|---|---|---|
+| collision_rate 高 + 成功率低 | 非対象物体を動かして失敗 | 軌道改善・collision 低減学習 |
+| collision_rate 低 + 成功率低 | 把持・配置・未到達 | データ追加・instruction 正規化 |
+| 成功率のみ低い | タスク未カバー | suite 追加 or 第2段階 LoRA |
+
+overall_score = 4 タスク成功率の平均。1 タスク +10pt ≒ 全体 +2.5pt。
+
+## 2. 優先度 A: instruction 正規化（推論・最優先）
+
+評価の `instruction`（`compe/t1/T1_TASKS.csv`）と学習データの task 文字列は **一致しない**。SmolVLA は言語条件付きのため `smolvla_mypolicy.py` の `reset()` で正規化する。
+
+| 評価 instruction | 学習 task へマップ |
+|---|---|
+| Pick the akita black bowl in the top layer of the wooden cabinet and place it on the plate | pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate |
+| Pick the tomato sauce and place it in the basket | pick up the tomato sauce and place it in the basket |
+| Pick the milk and place it in the basket | pick up the milk and place it in the basket |
+| Put the bowl on the stove | （そのまま） |
+
+実装: `INSTRUCTION_ALIASES` を `instruction.strip().lower()` で引く。`submission_template/smolvla_mypolicy.py` と `examples/.../smolvla_mypolicy.py` の両方を更新。
+
+正規化追加後、**旧・新モデル両方**で再評価してから提出モデルを決める。
+
+## 3. 優先度 B: ベースモデル選択
+
+multi-suite 再学習で全体スコアが下がった場合、提出は **旧 spatial-only merged** を優先検討:
+
+- 旧: `work/smolvla_libero_plus_spatial_lora_merged/`
+- 新: `work/smolvla_libero_plus_multisuite_merged/`
+
+```bash
+cp -r examples/smolvla_libero_spatial_lora_local/work/smolvla_libero_plus_spatial_lora_merged \
+      submission_template/model_weights/smolvla_spatial_lora
+```
+
+instruction 正規化 + 旧モデルの組み合わせが最も ROI が高い。
+
+## 4. 優先度 C: 第2段階 LoRA（Track 1 特化）
+
+740 ep 全 suite 一括より、**弱点 4 タスクだけ**追加学習:
+
+- spatial: 引き出しボウル
+- object: トマトソース、ミルク
+- goal: ボウル→コンロ
+
+設定目安: `FREEZE_VISION_ENCODER=True`, `STEPS=10000`, `LEARNING_RATE=1e-4`, `LORA_R=32`。ベースは `lerobot/smolvla_libero_plus` より **旧 merged モデル**。
+
+学習前に task 名確認:
+
+```bash
+python examples/smolvla_libero_spatial_lora_local/list_dataset_tasks.py
+```
+
+## 5. 優先度 D: checkpoint 選び直し
+
+終端 40k steps が最良とは限らない。`merge_lora.py` で `config.STEPS` を 10000/20000/30000/40000 に変えて merge し、Track 1 全体で best を選ぶ。
+
+## 6. 優先度 E: トマトソース collision（70% 付近が続く場合）
+
+- 推論: action chunk 先頭 step のスケール 0.7〜0.8（試験的）
+- 学習: tomato デモ ep 増 + 成功軌道優先
+- 評価: `--max-steps 600` も試す（timeout 確認）
+
+## 7. multi-suite 学習（新規学習時）
+
+```bash
+cd /mnt/robot_ssd/PARC2026_pre
+source examples/smolvla_libero_spatial_lora_local/env_smolvla.sh
+conda activate ~/.local/smolvla-conda-env
+
+python examples/smolvla_libero_spatial_lora_local/list_dataset_tasks.py
+python examples/smolvla_libero_spatial_lora_local/download_dataset.py
+python examples/smolvla_libero_spatial_lora_local/train.py          # spatial+object+goal
+python examples/smolvla_libero_spatial_lora_local/train.py --spatial-only  # 従来互換
+```
+
+`config.py` の task 名は **lerobot/libero_plus 実名**（`pick up...` / `put...`）を使う。BDDL の `Pick the...` 表記は不可。
+
+## 8. 評価・提出
+
+```bash
+# ターミナル1
+bash examples/smolvla_libero_spatial_lora_local/run_policy_server.sh --port 8000
+
+# ターミナル2
+source env.sh
+python -m pipeline --server-url http://localhost:8000 --track track1 --n-episodes 20
+
+# 提出前
+python validate_submission.py submission.zip --install
+bash examples/smolvla_libero_spatial_lora_local/bundle_submission.sh
+# → submission-zip-copy ルールに従い ~/PARC2026_submission/ へコピー
+```
+
+## 9. エージェント向け
+
+- 評価 JSON を分析するときは **タスク別** に前回結果と比較する（全体平均だけ見ない）。
+- instruction 正規化未実装なら、学習変更より先に提案・実装する。
+- multi-suite で劣化した場合、全 suite 再学習を繰り返さず第2段階 LoRA または旧モデル回帰を提案する。
+- 変更後は必ず Track 1 4 タスク全体（20 ep 推奨）で再評価する。

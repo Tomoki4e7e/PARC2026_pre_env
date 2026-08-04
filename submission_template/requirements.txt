@@ -1,0 +1,22 @@
+# ポリシーサーバー依存（必須）
+fastapi>=0.68
+uvicorn>=0.15
+msgpack>=1.0
+numpy>=1.19
+
+# SmolVLA 推論用
+# lerobot==0.6.0 は Python>=3.12 必須のため pip 不可。vendor/lerobot/ に同梱する。
+# 採点環境 (Python 3.10) では bundle_submission.sh で vendor を zip に含めること。
+draccus
+einops
+gymnasium
+opencv-python-headless
+termcolor
+typing_extensions
+torchvision
+safetensors>=0.4
+transformers>=5.0,<6
+accelerate>=0.33
+peft>=0.13
+pillow>=10.0
+num2words
