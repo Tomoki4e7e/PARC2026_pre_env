@@ -16,6 +16,11 @@ DEST="$SUB/model_weights/smolvla_spatial_lora"
 VARIANT="${1:-multisuite}"
 
 case "$VARIANT" in
+  base)
+    # LoRA 追加学習前の素の lerobot/smolvla_libero_plus（汎化の基準点）
+    REV="$(sed -n 's/^BASE_MODEL_REVISION = "\(.*\)"/\1/p' "$SCRIPT_DIR/config.py")"
+    SRC="$WORK/hf_cache/hub/models--lerobot--smolvla_libero_plus/snapshots/$REV"
+    ;;
   multisuite)
     SRC="$WORK/smolvla_libero_plus_multisuite_merged"
     ;;
@@ -29,7 +34,8 @@ case "$VARIANT" in
     SRC="$WORK/smolvla_libero_plus_phase3_holdout_merged"
     ;;
   *)
-    echo "[deploy] ERROR: unknown variant '$VARIANT' (use: multisuite, spatial, stage2, phase3)"
+    echo "[deploy] ERROR: unknown variant '$VARIANT'"
+    echo "  use: base, multisuite, spatial, stage2, phase3"
     exit 1
     ;;
 esac
@@ -53,7 +59,7 @@ fi
 if [ ! -d "$DEST" ]; then
     mkdir -p "$DEST"
 fi
-rsync -a --delete "$SRC/" "$DEST/"
+rsync -aL --delete --exclude 'train_config.json' "$SRC/" "$DEST/"
 cp "$SCRIPT_DIR/smolvla_mypolicy.py" "$SUB/smolvla_mypolicy.py"
 
 echo "[deploy] 完了 ($(du -sh "$DEST" | cut -f1))"

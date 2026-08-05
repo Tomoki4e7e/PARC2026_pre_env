@@ -12,6 +12,8 @@ submission_template/policy_server.py の MyPolicy クラスを、この内容で
 from __future__ import annotations
 
 import math
+import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -67,10 +69,55 @@ def _prepare_image(img: np.ndarray) -> np.ndarray:
     return arr.astype(np.float32)
 
 
-# PARC 評価 instruction → lerobot/libero_plus 学習 task 文字列（compe/t1/T1_TASKS.csv）
-INSTRUCTION_ALIASES: dict[str, str] = {
-    "pick the akita black bowl in the top layer of the wooden cabinet and place it on the plate": (
-        "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate"
+# PARC 評価 instruction → lerobot/libero_plus 学習 task 文字列。
+# LIBERO-plus の bddl (:language) は評価側の言い回し（"Pick the akita black bowl ..."）で、
+# 学習データの task 文字列（"pick up the black bowl ..."）とは全タスクで異なる。
+# 表は gen_instruction_aliases.py が全ベースタスク分を生成する。
+try:
+    from instruction_aliases import INSTRUCTION_ALIASES
+except ImportError:  # 生成物が無い場合は example 4 タスクのみ最低限カバーする
+    INSTRUCTION_ALIASES: dict[str, str] = {
+        "pick the akita black bowl in the top layer of the wooden cabinet "
+        "and place it on the plate": (
+            "pick up the black bowl in the top drawer of the wooden cabinet "
+            "and place it on the plate"
+        ),
+        "pick the tomato sauce and place it in the basket": (
+            "pick up the tomato sauce and place it in the basket"
+        ),
+        "pick the milk and place it in the basket": (
+            "pick up the milk and place it in the basket"
+        ),
+    }
+
+# 表に無い言い回し向けの規則。評価側の語彙を学習側へ寄せる。
+INSTRUCTION_REWRITE_RULES: tuple[tuple[str, str], ...] = (
+    ("pick the akita black bowl", "pick up the black bowl"),
+    ("pick the", "pick up the"),
+    ("the akita black bowl", "the black bowl"),
+    ("the cookies box", "the cookie box"),
+    ("the top layer of the wooden cabinet", "the top drawer of the wooden cabinet"),
+    ("the middle layer of the drawer", "the middle drawer of the cabinet"),
+    ("the top layer of the drawer", "the top drawer"),
+    ("on the top of the drawer", "on top of the cabinet"),
+    ("put the cream cheese on the bowl", "put the cream cheese in the bowl"),
+)
+
+# ローカル proxy 評価では task 名由来のサフィックス（"... table 1" 等）が
+# instruction に混入する。本番 CSV には無いので落として同条件にする。
+_VARIANT_SUFFIX_RE = re.compile(
+    r"\s+(?:table|tb|light|add|language)\s+\d+$"
+    r"|\s+level\d+\s+sample\d+$"
+    r"|\s+view(?:\s+\d+)+\s+initstate\s+\d+(?:\s+noise\s+\d+)?$"
+    r"|\s+initstate\s+\d+(?:\s+noise\s+\d+)?$"
+)
+
+# 旧実装が持っていた example 4 タスク分のみの対応表（A/B 比較の対照）
+LEGACY_INSTRUCTION_ALIASES: dict[str, str] = {
+    "pick the akita black bowl in the top layer of the wooden cabinet "
+    "and place it on the plate": (
+        "pick up the black bowl in the top drawer of the wooden cabinet "
+        "and place it on the plate"
     ),
     "pick the tomato sauce and place it in the basket": (
         "pick up the tomato sauce and place it in the basket"
@@ -78,9 +125,18 @@ INSTRUCTION_ALIASES: dict[str, str] = {
     "pick the milk and place it in the basket": (
         "pick up the milk and place it in the basket"
     ),
-    # タスク4: 評価文言はそのままだが学習 task 名（小文字）へ正規化
     "put the bowl on the stove": "put the bowl on the stove",
 }
+
+# instruction 正規化モード（既定 generic）。A/B 比較用に環境変数で切替できる。
+#   generic: 全タスク対応表 + 規則書き換え + 変種サフィックス除去
+#   alias:   全タスク対応表のみ
+#   legacy:  example 4 タスクのみの対応表（提出済みバージョンの挙動）
+#   raw:     小文字化のみ
+INSTRUCTION_MODE = os.environ.get("PARC_INSTRUCTION_MODE", "generic").strip().lower()
+
+# 新 chunk 先頭 step のスケーリングを使うか（0 で無効化）
+ENABLE_CHUNK_SCALE = os.environ.get("PARC_CHUNK_SCALE", "1").strip() not in ("0", "false")
 
 # Phase 1: 新 chunk 先頭 step の並進・回転スケール（gripper は変更しない）
 # collision_rate が高いタスク向け。未指定は 1.0（スケールなし）。
@@ -97,7 +153,21 @@ CHUNK_FIRST_STEP_ACTION_SCALE: dict[str, float] = {
 
 def _normalize_instruction(instruction: str) -> str:
     """評価パイプラインの instruction を学習データの task 文字列へ変換。"""
-    key = instruction.strip().lower()
+    key = " ".join(instruction.split()).lower().rstrip(".")
+    if INSTRUCTION_MODE == "raw":
+        return key
+    if INSTRUCTION_MODE == "legacy":
+        return LEGACY_INSTRUCTION_ALIASES.get(key, key)
+    if INSTRUCTION_MODE != "alias":
+        key = _VARIANT_SUFFIX_RE.sub("", key)
+    aliased = INSTRUCTION_ALIASES.get(key)
+    if aliased is not None:
+        return aliased
+    if INSTRUCTION_MODE == "alias":
+        return key
+    for before, after in INSTRUCTION_REWRITE_RULES:
+        if before in key:
+            key = key.replace(before, after)
     return INSTRUCTION_ALIASES.get(key, key)
 
 
@@ -264,7 +334,7 @@ class SmolVLAMyPolicy(BasePolicy):
         if action.shape != (7,):
             raise ValueError(f"Expected action shape (7,), got {action.shape}")
 
-        if new_chunk:
+        if new_chunk and ENABLE_CHUNK_SCALE:
             scale = CHUNK_FIRST_STEP_ACTION_SCALE.get(self.instruction, 1.0)
             action = _scale_action_motion(action, scale)
 

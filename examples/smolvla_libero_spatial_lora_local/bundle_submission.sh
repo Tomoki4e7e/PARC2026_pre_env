@@ -41,6 +41,7 @@ rm -f "$OUTPUT"
     zip -r "$OUTPUT" \
         policy_server.py \
         smolvla_mypolicy.py \
+        instruction_aliases.py \
         lerobot_bootstrap.py \
         requirements.txt \
         vendor/ \

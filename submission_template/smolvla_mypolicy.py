@@ -12,6 +12,8 @@ submission_template/policy_server.py の MyPolicy クラスを、この内容で
 from __future__ import annotations
 
 import math
+import os
+import re
 from pathlib import Path
 
 import numpy as np
@@ -67,10 +69,56 @@ def _prepare_image(img: np.ndarray) -> np.ndarray:
     return arr.astype(np.float32)
 
 
-# PARC 評価 instruction → lerobot/libero_plus 学習 task 文字列（compe/t1/T1_TASKS.csv）
-INSTRUCTION_ALIASES: dict[str, str] = {
-    "pick the akita black bowl in the top layer of the wooden cabinet and place it on the plate": (
-        "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate"
+# PARC 評価 instruction → lerobot/libero_plus 学習 task 文字列。
+# LIBERO-plus の bddl (:language) は評価側の言い回し（"Pick the akita black bowl ..."）で、
+# 学習データの task 文字列（"pick up the black bowl ..."）とは全タスクで異なる。
+# 表は gen_instruction_aliases.py が全ベースタスク分を生成する。
+try:
+    from instruction_aliases import CANONICAL_TASKS, INSTRUCTION_ALIASES
+except ImportError:  # 生成物が無い場合は example 4 タスクのみ最低限カバーする
+    CANONICAL_TASKS: tuple[str, ...] = ()
+    INSTRUCTION_ALIASES: dict[str, str] = {
+        "pick the akita black bowl in the top layer of the wooden cabinet "
+        "and place it on the plate": (
+            "pick up the black bowl in the top drawer of the wooden cabinet "
+            "and place it on the plate"
+        ),
+        "pick the tomato sauce and place it in the basket": (
+            "pick up the tomato sauce and place it in the basket"
+        ),
+        "pick the milk and place it in the basket": (
+            "pick up the milk and place it in the basket"
+        ),
+    }
+
+# 表に無い言い回し向けの規則。評価側の語彙を学習側へ寄せる。
+INSTRUCTION_REWRITE_RULES: tuple[tuple[str, str], ...] = (
+    ("pick the akita black bowl", "pick up the black bowl"),
+    ("pick the", "pick up the"),
+    ("the akita black bowl", "the black bowl"),
+    ("the cookies box", "the cookie box"),
+    ("the top layer of the wooden cabinet", "the top drawer of the wooden cabinet"),
+    ("the middle layer of the drawer", "the middle drawer of the cabinet"),
+    ("the top layer of the drawer", "the top drawer"),
+    ("on the top of the drawer", "on top of the cabinet"),
+    ("put the cream cheese on the bowl", "put the cream cheese in the bowl"),
+)
+
+# ローカル proxy 評価では task 名由来のサフィックス（"... table 1" 等）が
+# instruction に混入する。本番 CSV には無いので落として同条件にする。
+_VARIANT_SUFFIX_RE = re.compile(
+    r"\s+(?:table|tb|light|add|language)\s+\d+$"
+    r"|\s+level\d+\s+sample\d+$"
+    r"|\s+view(?:\s+\d+)+\s+initstate\s+\d+(?:\s+noise\s+\d+)?$"
+    r"|\s+initstate\s+\d+(?:\s+noise\s+\d+)?$"
+)
+
+# 旧実装が持っていた example 4 タスク分のみの対応表（A/B 比較の対照）
+LEGACY_INSTRUCTION_ALIASES: dict[str, str] = {
+    "pick the akita black bowl in the top layer of the wooden cabinet "
+    "and place it on the plate": (
+        "pick up the black bowl in the top drawer of the wooden cabinet "
+        "and place it on the plate"
     ),
     "pick the tomato sauce and place it in the basket": (
         "pick up the tomato sauce and place it in the basket"
@@ -78,9 +126,111 @@ INSTRUCTION_ALIASES: dict[str, str] = {
     "pick the milk and place it in the basket": (
         "pick up the milk and place it in the basket"
     ),
-    # タスク4: 評価文言はそのままだが学習 task 名（小文字）へ正規化
     "put the bowl on the stove": "put the bowl on the stove",
 }
+
+# 言い換え instruction（LIBERO-plus の language 摂動）で使われる語 → LIBERO の正規語。
+# 学習データの task 文字列に寄せてから類似度照合する。長いフレーズを先に適用する。
+PARAPHRASE_SYNONYMS: tuple[tuple[str, str], ...] = (
+    ("dark hued", "darkhued"),
+    ("dark colored", "darkcolored"),
+    ("darkhued curved container", "black bowl"),
+    ("darkhued concave container", "black bowl"),
+    ("darkhued mixing vessel", "black bowl"),
+    ("darkcolored spherical vessel", "black bowl"),
+    ("darkcolored rounded container", "black bowl"),
+    ("black ceramic bowl", "black bowl"),
+    ("akita black bowl", "black bowl"),
+    ("darkhued", "black"),
+    ("darkcolored", "black"),
+    ("obsidian", "black"),
+    ("ebony", "black"),
+    ("small ceramic baking dish", "ramekin"),
+    ("small ceramic dish", "ramekin"),
+    ("small baking dish", "ramekin"),
+    ("flat dining ware", "plate"),
+    ("flat dish holder", "plate"),
+    ("flat serving dish", "plate"),
+    ("flat dish", "plate"),
+    ("dinner plate", "plate"),
+    ("serving dish", "plate"),
+    ("cookies box", "cookie box"),
+    ("biscuit box", "cookie box"),
+    ("wicker container", "basket"),
+    ("woven container", "basket"),
+    ("cooking appliance", "stove"),
+    ("cooking range", "stove"),
+    ("stove surface", "stove"),
+    ("burner", "stove"),
+    ("wooden cupboard", "wooden cabinet"),
+    ("wooden storage unit", "wooden cabinet"),
+    ("cupboard", "cabinet"),
+    ("middle of the flat surface for meals", "table center"),
+    ("middle of the dining surface", "table center"),
+    ("middle of the eating surface", "table center"),
+    ("heart of the eating surface", "table center"),
+    ("center of the table", "table center"),
+    ("middle of the table", "table center"),
+    ("table centre", "table center"),
+    ("relocate", "place"),
+    ("reposition", "place"),
+    ("position", "place"),
+    ("set it atop", "place it on"),
+    ("set it upon", "place it on"),
+    ("set it down onto", "place it on"),
+    ("set it on", "place it on"),
+    ("place it atop", "place it on"),
+    ("atop", "on"),
+    ("upon", "on"),
+    ("grasp", "pick up"),
+    ("retrieve", "pick up"),
+    ("collect", "pick up"),
+    ("lift", "pick up"),
+    ("midway between", "between"),
+    ("in the narrow space separating", "between"),
+    ("amid", "between"),
+    ("adjacent to", "next to"),
+    ("beside", "next to"),
+    ("alongside", "next to"),
+)
+
+# 文字 n-gram 類似度がこの値を下回る場合は写像せず、元の instruction を使う
+PARAPHRASE_MATCH_MIN_SCORE = 0.25
+
+# LIBERO-plus の language 変種を教師データにした TF-IDF セントロイド分類器。
+# build_paraphrase_model.py が生成する。5-fold CV で未知の言い換えに 93% 前後。
+try:
+    from paraphrase_model import CENTROIDS as _PARAPHRASE_CENTROIDS
+    from paraphrase_model import IDF as _PARAPHRASE_IDF
+except ImportError:  # 生成物が無い場合は文字 n-gram 照合のみで動く
+    _PARAPHRASE_CENTROIDS: dict[str, dict[str, float]] = {}
+    _PARAPHRASE_IDF: dict[str, float] = {}
+
+# 分類器スコアがこの値を下回る場合は文字 n-gram 照合へ落とす
+PARAPHRASE_MODEL_MIN_SCORE = 0.10
+
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# build_paraphrase_model.py の STOPWORDS と一致させること
+_STOPWORDS = frozenset(
+    """a an the of to in on at it its this that these those and or for with from
+    into onto over under by as is are be been being do does did can could would
+    should will shall may might must please kindly you your i me my we our then
+    now just also very really quite so such if while when where which who whom
+    there here what how why not no nor but than too own same s t don now
+    """.split()
+)
+
+# instruction 正規化モード（既定 alias）。A/B 比較用に環境変数で切替できる。
+#   match:   generic + 未知 instruction も最も近い学習 task 文字列へ写す（実験専用）
+#   generic: 全タスク対応表 + 規則書き換え + 変種サフィックス除去
+#   alias:   既知の完全一致対応表のみ。未知 task は原文を保持する本番安全モード
+#   legacy:  example 4 タスクのみの対応表（提出済みバージョンの挙動）
+#   raw:     小文字化のみ
+INSTRUCTION_MODE = os.environ.get("PARC_INSTRUCTION_MODE", "alias").strip().lower()
+
+# 新 chunk 先頭 step のスケーリングを使うか（0 で無効化）
+ENABLE_CHUNK_SCALE = os.environ.get("PARC_CHUNK_SCALE", "1").strip() not in ("0", "false")
 
 # Phase 1: 新 chunk 先頭 step の並進・回転スケール（gripper は変更しない）
 # collision_rate が高いタスク向け。未指定は 1.0（スケールなし）。
@@ -95,10 +245,117 @@ CHUNK_FIRST_STEP_ACTION_SCALE: dict[str, float] = {
 }
 
 
+def _apply_paraphrase_synonyms(text: str) -> str:
+    out = text
+    for before, after in PARAPHRASE_SYNONYMS:
+        if before in out:
+            out = out.replace(before, after)
+    return out
+
+
+def _char_ngrams(text: str, n: int = 4) -> dict[str, int]:
+    cleaned = re.sub(r"[^a-z0-9]+", " ", text)
+    counts: dict[str, int] = {}
+    for index in range(max(len(cleaned) - n + 1, 0)):
+        gram = cleaned[index : index + n]
+        counts[gram] = counts.get(gram, 0) + 1
+    return counts
+
+
+def _cosine(a: dict[str, int], b: dict[str, int]) -> float:
+    if not a or not b:
+        return 0.0
+    dot = sum(count * b.get(gram, 0) for gram, count in a.items())
+    norm_a = math.sqrt(sum(count * count for count in a.values()))
+    norm_b = math.sqrt(sum(count * count for count in b.values()))
+    if norm_a == 0.0 or norm_b == 0.0:
+        return 0.0
+    return dot / (norm_a * norm_b)
+
+
+_CANONICAL_NGRAMS = tuple((task, _char_ngrams(task)) for task in CANONICAL_TASKS)
+
+
+def _paraphrase_features(text: str) -> dict[str, int]:
+    """build_paraphrase_model.py の features() と同一の素性を作る。"""
+    tokens = [t for t in _TOKEN_RE.findall(text.lower()) if t not in _STOPWORDS]
+    feats: dict[str, int] = {}
+    for token in tokens:
+        key = f"w:{token}"
+        feats[key] = feats.get(key, 0) + 1
+    for left, right in zip(tokens, tokens[1:]):
+        key = f"b:{left}_{right}"
+        feats[key] = feats.get(key, 0) + 1
+    cleaned = re.sub(r"[^a-z0-9]+", " ", text.lower())
+    for index in range(max(len(cleaned) - 3, 0)):
+        key = f"c:{cleaned[index : index + 4]}"
+        feats[key] = feats.get(key, 0) + 1
+    return feats
+
+
+def _classify_paraphrase(instruction: str) -> tuple[str | None, float]:
+    """学習済みセントロイドで言い換えを正規 task 文字列へ分類する。"""
+    if not _PARAPHRASE_CENTROIDS:
+        return None, 0.0
+    raw = {
+        feat: (1.0 + math.log(count)) * _PARAPHRASE_IDF[feat]
+        for feat, count in _paraphrase_features(instruction).items()
+        if feat in _PARAPHRASE_IDF
+    }
+    norm = math.sqrt(sum(value * value for value in raw.values()))
+    if norm == 0.0:
+        return None, 0.0
+    best, best_score = None, 0.0
+    for task, centroid in _PARAPHRASE_CENTROIDS.items():
+        score = sum(
+            value * centroid.get(feat, 0.0) for feat, value in raw.items()
+        ) / norm
+        if score > best_score:
+            best, best_score = task, score
+    return best, best_score
+
+
+def _match_canonical_task(instruction: str) -> str | None:
+    """言い換え instruction を最も近い学習 task 文字列へ写す。"""
+    if not _CANONICAL_NGRAMS:
+        return None
+    query = _char_ngrams(_apply_paraphrase_synonyms(instruction))
+    best, best_score = None, 0.0
+    for task, grams in _CANONICAL_NGRAMS:
+        score = _cosine(query, grams)
+        if score > best_score:
+            best, best_score = task, score
+    if best is None or best_score < PARAPHRASE_MATCH_MIN_SCORE:
+        return None
+    return best
+
+
 def _normalize_instruction(instruction: str) -> str:
     """評価パイプラインの instruction を学習データの task 文字列へ変換。"""
-    key = instruction.strip().lower()
-    return INSTRUCTION_ALIASES.get(key, key)
+    key = " ".join(instruction.split()).lower().rstrip(".")
+    if INSTRUCTION_MODE == "raw":
+        return key
+    if INSTRUCTION_MODE == "legacy":
+        return LEGACY_INSTRUCTION_ALIASES.get(key, key)
+    if INSTRUCTION_MODE != "alias":
+        key = _VARIANT_SUFFIX_RE.sub("", key)
+    aliased = INSTRUCTION_ALIASES.get(key)
+    if aliased is not None:
+        return aliased
+    if INSTRUCTION_MODE == "alias":
+        return key
+    for before, after in INSTRUCTION_REWRITE_RULES:
+        if before in key:
+            key = key.replace(before, after)
+    key = INSTRUCTION_ALIASES.get(key, key)
+    if INSTRUCTION_MODE == "match" and key not in CANONICAL_TASKS:
+        predicted, score = _classify_paraphrase(key)
+        if predicted is not None and score >= PARAPHRASE_MODEL_MIN_SCORE:
+            return predicted
+        matched = _match_canonical_task(key)
+        if matched is not None:
+            return matched
+    return key
 
 
 def _scale_action_motion(action: np.ndarray, scale: float) -> np.ndarray:
@@ -231,6 +488,26 @@ class SmolVLAMyPolicy(BasePolicy):
                 "submission_template/model_weights/smolvla_spatial_lora/ へコピーしてください。"
             )
 
+        print(
+            f"[smolvla] instruction_mode={INSTRUCTION_MODE} "
+            f"aliases={len(INSTRUCTION_ALIASES)} canonical={len(CANONICAL_TASKS)} "
+            f"paraphrase_classes={len(_PARAPHRASE_CENTROIDS)}",
+            flush=True,
+        )
+        # 生成物の同梱漏れは静かに性能を落とすだけなので、採点ログに必ず残す。
+        if INSTRUCTION_MODE == "match" and not _PARAPHRASE_CENTROIDS:
+            print(
+                "[smolvla] WARNING: paraphrase_model.py が読み込めず言い換え分類器が"
+                "無効です。zip への同梱漏れの可能性があります（language 摂動で大きく成績が"
+                "落ちます）。",
+                flush=True,
+            )
+        if not CANONICAL_TASKS:
+            print(
+                "[smolvla] WARNING: instruction_aliases.py が読み込めず instruction "
+                "対応表が最小構成です。zip への同梱漏れの可能性があります。",
+                flush=True,
+            )
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.policy = SmolVLAPolicy.from_pretrained(str(model_path)).to(self.device)
         self.policy.eval()
@@ -264,7 +541,7 @@ class SmolVLAMyPolicy(BasePolicy):
         if action.shape != (7,):
             raise ValueError(f"Expected action shape (7,), got {action.shape}")
 
-        if new_chunk:
+        if new_chunk and ENABLE_CHUNK_SCALE:
             scale = CHUNK_FIRST_STEP_ACTION_SCALE.get(self.instruction, 1.0)
             action = _scale_action_motion(action, scale)
 

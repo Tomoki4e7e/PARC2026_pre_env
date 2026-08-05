@@ -1,4 +1,5 @@
 import logging
+import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,21 @@ def _ensure_libero_t1_registered() -> bool:
         return False
 
 
+def _ensure_local_proxy_registered() -> bool:
+    """ローカル層別プロキシ（libero_proxy）を登録する。本番採点には存在しない。"""
+    if os.environ.get("PARC_ENABLE_PROXY_SUITE", "").strip() in ("", "0", "false"):
+        return False
+    try:
+        from compe.proxy.register import register_proxy
+
+        register_proxy()
+        logger.info("libero_proxy スイートを登録しました。")
+        return True
+    except Exception as exc:
+        logger.warning("register_proxy() に失敗しました: %s", exc)
+        return False
+
+
 def parse_obj_of_interest(bddl_file: str | Path) -> set[str]:
     txt = Path(bddl_file).read_text()
     m = re.search(r"\(:obj_of_interest(.*?)\)\s*\(:init", txt, re.S)
@@ -52,6 +68,7 @@ class EnvironmentManager:
         self.config = eval_config
 
         _ensure_libero_t1_registered()
+        _ensure_local_proxy_registered()
         self._benchmark_dict = libero_benchmark.get_benchmark_dict()
 
     def get_task_suite(self, benchmark_name: str) -> Any:
