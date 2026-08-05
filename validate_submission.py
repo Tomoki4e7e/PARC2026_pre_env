@@ -12,6 +12,368 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+_REPO_ROOT = Path(__file__).resolve().parent
+
+
+def _validation_temp_root() -> Path:
+    """動的検証の一時ファイル置き場。
+
+    ルート / の /tmp が満杯の環境向け、リポジトリ配下 robot_ssd (work/) を使う。
+    上書き: 環境変数 VALIDATE_SUBMISSION_TMPDIR
+    """
+    override = os.environ.get("VALIDATE_SUBMISSION_TMPDIR")
+    if override:
+        root = Path(override)
+    else:
+        root = _REPO_ROOT / "work" / "validate_submission_tmp"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _validation_mkdtemp(prefix: str) -> Path:
+    return Path(tempfile.mkdtemp(prefix=prefix, dir=_validation_temp_root()))
+
+
+def _validation_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["TMPDIR"] = str(_validation_temp_root())
+    return env
+
+
+# pytorch/vision README の torch ↔ torchvision 対応表（採点 venv: 2.11 → 0.26）
+_TORCH_TORCHVISION: list[tuple[tuple[int, int], str]] = [
+    ((2, 13), "0.28.0"),
+    ((2, 12), "0.27.1"),
+    ((2, 11), "0.26.0"),
+    ((2, 10), "0.25.0"),
+    ((2, 9), "0.24.1"),
+    ((2, 8), "0.23.0"),
+    ((2, 7), "0.22.1"),
+    ((2, 6), "0.21.0"),
+]
+
+
+def _installed_torch_major_minor() -> tuple[int, int] | None:
+    try:
+        import torch
+        parts = torch.__version__.split("+")[0].split(".")
+        return int(parts[0]), int(parts[1])
+    except Exception:
+        return None
+
+
+def _compatible_torchvision_version(major: int, minor: int) -> str | None:
+    for (ma, mi), tv in _TORCH_TORCHVISION:
+        if (major, minor) == (ma, mi):
+            return tv
+    return None
+
+
+def _resolve_torchvision_spec(spec: str, *, adapt_to_torch: bool) -> str:
+    """採点用 pin を維持しつつ、ローカル --install 時は torch 版に合わせる。"""
+    if not adapt_to_torch or not spec.strip().lower().startswith("torchvision"):
+        return spec
+    tm = _installed_torch_major_minor()
+    if tm is None:
+        return spec
+    tv = _compatible_torchvision_version(*tm)
+    if tv is None:
+        return spec
+    if re.search(r"torchvision\s*==", spec, re.I):
+        return re.sub(r"(torchvision\s*==)[^\s;]+", rf"\g<1>{tv}", spec, flags=re.I)
+    return f"torchvision=={tv}"
+
+
+def _verify_torchvision_import(report: Report) -> bool:
+    try:
+        from torchvision.transforms import v2  # noqa: F401
+        return True
+    except Exception as e:
+        tm = _installed_torch_major_minor()
+        hint = ""
+        if tm:
+            tv = _compatible_torchvision_version(*tm)
+            if tv:
+                hint = (f"  ローカル torch {tm[0]}.{tm[1]} には torchvision=={tv} が必要です。"
+                        f" `--install` を再実行するか、"
+                        f"`pip install --no-deps torchvision=={tv}` を実行してください。")
+        report.error("smoke.torchvision_mismatch",
+                     f"torch / torchvision のバージョン不一致: {e}{hint}")
+        return False
+
+
+def _split_requirements_for_install(text: str) -> tuple[list[str], list[str]]:
+    """requirements.txt を通常 install 用と --no-deps 用（torchvision 等）に分割。"""
+    normal: list[str] = []
+    no_deps: list[str] = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            normal.append(raw)
+            continue
+        first = _split_option(s.split()[0])
+        if first == "--no-deps":
+            continue
+        if first.startswith("torchvision"):
+            no_deps.append(s)
+            continue
+        normal.append(raw)
+    return normal, no_deps
+
+
+def _pip_install_requirements(
+    req_path: Path,
+    report: Report,
+    *,
+    dry_run: bool = False,
+    error_code: str = "smoke.install_failed",
+    timeout: int = 300,
+) -> bool:
+    import subprocess
+
+    text = req_path.read_text(encoding="utf-8", errors="replace")
+    normal, no_deps = _split_requirements_for_install(text)
+    env = _validation_env()
+    extra: list[str] = ["--dry-run"] if dry_run else []
+    quiet = ["-q"]
+
+    has_packages = any(ln.strip() and not ln.strip().startswith("#") for ln in normal)
+    if has_packages:
+        filtered = req_path.parent / ".requirements_filtered.txt"
+        filtered.write_text("\n".join(normal) + ("\n" if normal else ""), encoding="utf-8")
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pip", "install", *quiet, *extra, "-r", str(filtered)],
+                cwd=str(req_path.parent), capture_output=True, text=True,
+                timeout=timeout, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            report.error("req.dry_run_timeout" if dry_run else error_code,
+                         f"pip が {timeout}秒 以内に完了しませんでした")
+            return False
+        finally:
+            filtered.unlink(missing_ok=True)
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]
+            report.error(error_code, "pip の依存解決に失敗:\n      " + "\n      ".join(tail))
+            return False
+
+    for spec in no_deps:
+        install_spec = _resolve_torchvision_spec(spec, adapt_to_torch=not dry_run)
+        if install_spec != spec and not dry_run:
+            tm = _installed_torch_major_minor()
+            report.info(
+                "smoke.torchvision_adapt",
+                f"ローカル torch {tm[0]}.{tm[1]} に合わせて {spec} → {install_spec} を"
+                f"インストール（採点 K8s は requirements.txt の pin のまま）",
+            )
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-m", "pip", "install", *quiet, *extra, "--no-deps", install_spec],
+                cwd=str(req_path.parent), capture_output=True, text=True,
+                timeout=timeout, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            report.error("req.dry_run_timeout" if dry_run else error_code,
+                         f"pip が {timeout}秒 以内に完了しませんでした ({spec})")
+            return False
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]
+            report.error(error_code,
+                         f"pip の依存解決に失敗 ({spec}):\n      " + "\n      ".join(tail))
+            return False
+    return True
+
+
+# 採点 venv にプリインストールされている（requirements.txt に書かなくても使える）もの
+GRADING_PREINSTALLED_DISTS = ("torch", "pip", "setuptools", "wheel")
+
+# import 可能でも requirements 由来と紐付かない実行基盤側のモジュール
+GRADING_EXTRA_TOP_LEVELS = frozenset(
+    {"sitecustomize", "usercustomize", "pkg_resources", "_distutils_hack", "setuptools", "pip"}
+)
+
+
+def _canonical_dist(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).strip().lower()
+
+
+def _requirement_dist_names(text: str) -> list[str]:
+    """requirements.txt からディストリビューション名を取り出す。"""
+    from packaging.requirements import Requirement, InvalidRequirement
+
+    names: list[str] = []
+    for raw in text.splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#") or s.startswith("-"):
+            continue
+        s = s.split(" #", 1)[0].strip()
+        try:
+            names.append(Requirement(s).name)
+        except InvalidRequirement:
+            continue
+    return names
+
+
+def _dist_top_levels() -> dict[str, set[str]]:
+    """インストール済み環境の「dist 名 → トップレベルモジュール名」対応表。"""
+    from importlib import metadata
+
+    mapping: dict[str, set[str]] = {}
+    for module, dists in metadata.packages_distributions().items():
+        for dist in dists:
+            mapping.setdefault(_canonical_dist(dist), set()).add(module)
+    return mapping
+
+
+def grading_allowed_top_levels(req_text: str) -> tuple[set[str], set[str], set[str]]:
+    """採点 venv で使えるトップレベルモジュール名と dist 名を推定する。
+
+    requirements.txt に書かれた dist とその推移的依存を、ローカル環境の
+    メタデータから展開する。戻り値は (モジュール名, dist 名, 解決できなかった dist 名)。
+    """
+    from importlib import metadata
+
+    from packaging.requirements import Requirement, InvalidRequirement
+
+    dist_top = _dist_top_levels()
+    allowed = set(GRADING_EXTRA_TOP_LEVELS)
+    unknown: set[str] = set()
+
+    seen: set[tuple[str, str]] = set()
+    queue: list[tuple[str, str]] = [
+        (_canonical_dist(n), "") for n in _requirement_dist_names(req_text)
+    ]
+    queue += [(_canonical_dist(n), "") for n in GRADING_PREINSTALLED_DISTS]
+
+    while queue:
+        name, extra = queue.pop()
+        if (name, extra) in seen:
+            continue
+        seen.add((name, extra))
+
+        allowed |= dist_top.get(name, {name.replace("-", "_")})
+        try:
+            requires = metadata.requires(name) or []
+        except metadata.PackageNotFoundError:
+            unknown.add(name)
+            continue
+
+        env = {"extra": extra}
+        for req in requires:
+            try:
+                parsed = Requirement(req)
+            except InvalidRequirement:
+                continue
+            if parsed.marker is not None and not parsed.marker.evaluate(env):
+                continue
+            child = _canonical_dist(parsed.name)
+            queue.append((child, ""))
+            for child_extra in sorted(parsed.extras):
+                queue.append((child, child_extra))
+
+    return allowed, {name for name, _ in seen}, unknown
+
+
+_STRICT_SITECUSTOMIZE = '''\
+"""site-packages を requirements.txt 由来のパッケージだけに絞り込むフック。
+
+採点 venv には requirements.txt とプリインストール分しか入っていない。
+ローカル環境の余剰パッケージで import が通ってしまう見逃しを防ぐため、
+許可リスト外のパッケージを「インストールされていない」状態に見せる。
+"""
+
+import os
+import re
+import sys
+from importlib.machinery import PathFinder
+from importlib.metadata import DistributionFinder, MetadataPathFinder
+
+_ALLOWED = set(os.environ.get("STRICT_DEPS_ALLOWED", "").split(","))
+_ALLOWED_DISTS = set(os.environ.get("STRICT_DEPS_ALLOWED_DISTS", "").split(","))
+_SITE_DIRS = [p for p in os.environ.get("STRICT_DEPS_SITE_DIRS", "").split(os.pathsep) if p]
+
+
+class _AllowedPackagesFinder:
+    """許可リストに載っているトップレベルパッケージだけを site-packages から解決する。"""
+
+    def find_spec(self, fullname, path=None, target=None):
+        if path is not None:
+            return None
+        if fullname.split(".")[0] not in _ALLOWED:
+            return None
+        return PathFinder.find_spec(fullname, _SITE_DIRS, target)
+
+    def find_distributions(self, context=DistributionFinder.Context()):
+        ctx = DistributionFinder.Context(name=context.name, path=_SITE_DIRS)
+        for dist in MetadataPathFinder().find_distributions(ctx):
+            name = re.sub(r"[-_.]+", "-", dist.metadata["Name"] or "").lower()
+            if name in _ALLOWED_DISTS:
+                yield dist
+
+
+def _under_site_packages(entry):
+    real = os.path.realpath(entry)
+    return any(real == d or real.startswith(d + os.sep) for d in _SITE_DIRS)
+
+
+sys.path[:] = [p for p in sys.path if not _under_site_packages(p)]
+sys.meta_path.append(_AllowedPackagesFinder())
+'''
+
+
+def _real_site_dirs() -> list[str]:
+    import site
+    import sysconfig
+
+    dirs = {sysconfig.get_paths()["purelib"], sysconfig.get_paths()["platlib"]}
+    try:
+        dirs.update(site.getsitepackages())
+    except AttributeError:
+        pass
+    user_site = getattr(site, "getusersitepackages", None)
+    if callable(user_site):
+        dirs.add(user_site())
+    return sorted({os.path.realpath(d) for d in dirs if d})
+
+
+def _setup_strict_deps_env(submission_dir: Path, report: Report) -> dict[str, str] | None:
+    """strict-deps 用の sitecustomize を用意し、サーバー起動用の環境変数を返す。"""
+    req = submission_dir / "requirements.txt"
+    if not req.is_file():
+        report.warn("strict.no_requirements", "requirements.txt が無いため strict-deps をスキップ")
+        return None
+
+    try:
+        allowed, allowed_dists, unknown = grading_allowed_top_levels(
+            req.read_text(encoding="utf-8", errors="replace")
+        )
+    except Exception as e:
+        report.warn("strict.setup_failed", f"strict-deps の許可リストを作れませんでした: {e}")
+        return None
+
+    if unknown:
+        report.warn(
+            "strict.unresolved_dists",
+            "ローカル未インストールで依存を辿れなかった dist: " + ", ".join(sorted(unknown)),
+        )
+
+    hook_dir = _validation_mkdtemp("valstrict_")
+    (hook_dir / "sitecustomize.py").write_text(_STRICT_SITECUSTOMIZE, encoding="utf-8")
+
+    env = _validation_env()
+    env["STRICT_DEPS_ALLOWED"] = ",".join(sorted(allowed))
+    env["STRICT_DEPS_ALLOWED_DISTS"] = ",".join(sorted(allowed_dists))
+    env["STRICT_DEPS_SITE_DIRS"] = os.pathsep.join(_real_site_dirs())
+    env["PYTHONPATH"] = str(hook_dir)
+    report.info(
+        "strict.enabled",
+        f"strict-deps 有効: 許可トップレベル {len(allowed)} 件 "
+        "（採点 venv に無いモジュールの import を失敗させます）",
+    )
+    return env
+
+
 MAX_ZIP_SIZE_MB = 20 * 1024
 MAX_EXTRACTED_SIZE_MB = 40 * 1024
 MAX_ENTRIES = 200_000
@@ -401,24 +763,12 @@ def check_requirements(text: str, report: Report) -> None:
 
 
 def pip_dry_run(req_path: str | Path, report: Report, timeout: int = 300) -> None:
-    import subprocess
     req_path = Path(req_path)
     if not req_path.is_file():
         return
-    try:
-        proc = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--dry-run", "-q", "-r", str(req_path)],
-            capture_output=True, text=True, timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        report.error("req.dry_run_timeout",
-                     f"pip の依存解決が {timeout}秒 以内に完了しませんでした（病的な"
-                     f"バージョン制約の疑い）")
-        return
-    if proc.returncode != 0:
-        tail = (proc.stderr or proc.stdout).strip().splitlines()[-5:]
-        report.error("req.dry_run_failed",
-                     "pip の依存解決に失敗:\n      " + "\n      ".join(tail))
+    _pip_install_requirements(
+        req_path, report, dry_run=True, error_code="req.dry_run_failed", timeout=timeout,
+    )
 
 
 def safe_extract(zip_path: str | Path, dest_dir: str | Path,
@@ -513,7 +863,7 @@ def _serialize_obs(obs) -> bytes:
 def smoke_test(submission_dir: str | Path, report: Report | None = None, *,
                camera: int = DEFAULT_CAMERA, port: int = 8931,
                health_timeout: int = 180, act_timeout: float = 10.0,
-               install: bool = False) -> Report:
+               install: bool = False, strict_deps: bool = False) -> Report:
     report = report or Report()
     d = Path(submission_dir)
 
@@ -537,23 +887,25 @@ def smoke_test(submission_dir: str | Path, report: Report | None = None, *,
 
     if install and (d / "requirements.txt").is_file():
         report.info("smoke.installing", "requirements.txt をインストール中...")
-        pi = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt"],
-            cwd=str(d), capture_output=True, text=True,
-        )
-        if pi.returncode != 0:
-            tail = (pi.stderr or pi.stdout).strip().splitlines()[-5:]
-            report.error("smoke.install_failed",
-                         "依存インストールに失敗:\n      " + "\n      ".join(tail))
+        if not _pip_install_requirements(d / "requirements.txt", report):
+            return report
+        if not _verify_torchvision_import(report):
             return report
 
-    log = tempfile.TemporaryFile(mode="w+b")
+    server_env = _validation_env()
+    if strict_deps:
+        strict_env = _setup_strict_deps_env(d, report)
+        if strict_env is not None:
+            server_env = strict_env
 
+    log = tempfile.NamedTemporaryFile(
+        mode="w+b", prefix="valsmoke_", dir=_validation_temp_root(), delete=True,
+    )
 
     proc = subprocess.Popen(
         [sys.executable, "policy_server.py", "--port", str(port)],
         cwd=str(d), stdout=log, stderr=subprocess.STDOUT,
-        start_new_session=True,
+        start_new_session=True, env=server_env,
     )
 
     descendants: list = []
@@ -788,7 +1140,7 @@ def _check_action_bytes(content: bytes, report: Report, camera: int,
 def validate(target: str | Path, *, static_only: bool = False,
              camera: int = DEFAULT_CAMERA, install: bool = False,
              do_pip_dry_run: bool = False, port: int = 8931,
-             health_timeout: int = 180) -> Report:
+             health_timeout: int = 180, strict_deps: bool = False) -> Report:
     report = Report()
     target = Path(target)
 
@@ -802,17 +1154,18 @@ def validate(target: str | Path, *, static_only: bool = False,
                 prefix, _ = _find_root_prefix(zf.namelist())
                 rn = f"{prefix}requirements.txt" if prefix is not None else None
                 if rn and rn in zf.namelist():
-                    tmp_root = Path(tempfile.mkdtemp(prefix="valreq_"))
+                    tmp_root = _validation_mkdtemp("valreq_")
                     (tmp_root / "requirements.txt").write_bytes(zf.read(rn))
                     pip_dry_run(tmp_root / "requirements.txt", report)
         if not report.ok:
             return report
         if not static_only:
-            work = Path(tempfile.mkdtemp(prefix="valdyn_"))
+            work = _validation_mkdtemp("valdyn_")
             try:
                 root = safe_extract(target, work, report)
                 smoke_test(root, report, camera=camera, install=install,
-                           port=port, health_timeout=health_timeout)
+                           port=port, health_timeout=health_timeout,
+                           strict_deps=strict_deps)
             finally:
                 import shutil
                 shutil.rmtree(work, ignore_errors=True)
@@ -822,7 +1175,8 @@ def validate(target: str | Path, *, static_only: bool = False,
             pip_dry_run(target / "requirements.txt", report)
         if report.ok and not static_only:
             smoke_test(target, report, camera=camera, install=install,
-                       port=port, health_timeout=health_timeout)
+                       port=port, health_timeout=health_timeout,
+                       strict_deps=strict_deps)
     else:
         report.error("input.invalid", f"zip でもディレクトリでもありません: {target}")
 
@@ -842,6 +1196,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="動的スモーク前に requirements.txt をインストールする")
     parser.add_argument("--pip-dry-run", action="store_true",
                         help="pip install --dry-run で依存解決可否を事前確認する（低速）")
+    parser.add_argument("--strict-deps", action="store_true",
+                        help="requirements.txt に無いモジュールの import を禁止して起動する"
+                             "（採点 venv 相当。ローカル環境の余剰パッケージによる見逃しを防ぐ）")
     parser.add_argument("--camera", type=int, default=DEFAULT_CAMERA,
                         help=f"ダミー観測のカメラ解像度（既定 {DEFAULT_CAMERA}）")
     parser.add_argument("--port", type=int, default=8931,
@@ -856,6 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
         args.target, static_only=args.static, camera=args.camera,
         install=args.install, do_pip_dry_run=args.pip_dry_run,
         port=args.port, health_timeout=args.health_timeout,
+        strict_deps=args.strict_deps,
     )
 
     if args.json:

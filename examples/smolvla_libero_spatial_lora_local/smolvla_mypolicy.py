@@ -78,13 +78,36 @@ INSTRUCTION_ALIASES: dict[str, str] = {
     "pick the milk and place it in the basket": (
         "pick up the milk and place it in the basket"
     ),
+    # タスク4: 評価文言はそのままだが学習 task 名（小文字）へ正規化
+    "put the bowl on the stove": "put the bowl on the stove",
+}
+
+# Phase 1: 新 chunk 先頭 step の並進・回転スケール（gripper は変更しない）
+# collision_rate が高いタスク向け。未指定は 1.0（スケールなし）。
+CHUNK_FIRST_STEP_ACTION_SCALE: dict[str, float] = {
+    "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate": 0.8,
+    "pick up the tomato sauce and place it in the basket": 0.75,
+    "put the bowl on the stove": 0.75,
+    "open the middle drawer of the cabinet": 0.75,
+    "turn on the stove": 0.7,
+    "pick up the alphabet soup and place it in the basket": 0.8,
+    "pick up the ketchup and place it in the basket": 0.8,
 }
 
 
 def _normalize_instruction(instruction: str) -> str:
     """評価パイプラインの instruction を学習データの task 文字列へ変換。"""
     key = instruction.strip().lower()
-    return INSTRUCTION_ALIASES.get(key, instruction.strip())
+    return INSTRUCTION_ALIASES.get(key, key)
+
+
+def _scale_action_motion(action: np.ndarray, scale: float) -> np.ndarray:
+    """並進・回転成分のみスケール（gripper=index 6 はそのまま）。"""
+    if scale == 1.0:
+        return action
+    scaled = action.copy()
+    scaled[:6] *= scale
+    return scaled
 
 
 def _build_lerobot_observation(obs: dict[str, np.ndarray], instruction: str) -> dict:
@@ -106,6 +129,7 @@ def _build_lerobot_observation(obs: dict[str, np.ndarray], instruction: str) -> 
 
 def _default_model_dir() -> Path:
     here = Path(__file__).resolve().parent
+    # Phase 2 汎化モデル（multi-suite）を優先。submission の model_weights は deploy_model.sh で上書き。
     candidates = [
         here / "model_weights" / "smolvla_spatial_lora",
         here.parent
@@ -116,11 +140,63 @@ def _default_model_dir() -> Path:
         / "smolvla_libero_spatial_lora_local"
         / "work"
         / "smolvla_libero_plus_spatial_lora_merged",
+        here.parent
+        / "smolvla_libero_spatial_lora_local"
+        / "work"
+        / "smolvla_libero_plus_track1_stage2_merged",
     ]
     for path in candidates:
         if (path / "config.json").is_file():
             return path
     return candidates[0]
+
+
+def _load_pre_post_processors(pretrained_path: str, device: str):
+    """保存済みの pre/post processor を読み込む。
+
+    lerobot.policies.factory の make_pre_post_processors と同じ処理だが、
+    factory は lerobot.envs（gymnasium 必須）や全 policy の config を eager import する。
+    採点 venv にはそれらが無いため、推論に必要な部分だけをここで組み立てる。
+    """
+    from lerobot.processor import (
+        AbsoluteActionsProcessorStep,
+        PolicyProcessorPipeline,
+        RelativeActionsProcessorStep,
+        batch_to_transition,
+        policy_action_to_transition,
+        transition_to_batch,
+        transition_to_policy_action,
+    )
+    from lerobot.utils.constants import (
+        POLICY_POSTPROCESSOR_DEFAULT_NAME,
+        POLICY_PREPROCESSOR_DEFAULT_NAME,
+    )
+
+    preprocessor = PolicyProcessorPipeline.from_pretrained(
+        pretrained_model_name_or_path=pretrained_path,
+        config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json",
+        overrides={"device_processor": {"device": device}},
+        to_transition=batch_to_transition,
+        to_output=transition_to_batch,
+    )
+    postprocessor = PolicyProcessorPipeline.from_pretrained(
+        pretrained_model_name_or_path=pretrained_path,
+        config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json",
+        overrides={},
+        to_transition=policy_action_to_transition,
+        to_output=transition_to_policy_action,
+    )
+
+    # relative→absolute の参照はシリアライズされないため、読み込み後に張り直す。
+    relative_step = next(
+        (s for s in preprocessor.steps if isinstance(s, RelativeActionsProcessorStep)), None
+    )
+    if relative_step is not None:
+        for step in postprocessor.steps:
+            if isinstance(step, AbsoluteActionsProcessorStep) and step.relative_step is None:
+                step.relative_step = relative_step
+
+    return preprocessor, postprocessor
 
 
 def _to_preprocessor_frame(frame: dict) -> dict:
@@ -145,7 +221,6 @@ class SmolVLAMyPolicy(BasePolicy):
         from lerobot_bootstrap import setup_vendored_lerobot
 
         setup_vendored_lerobot()
-        from lerobot.policies.factory import make_pre_post_processors
         from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 
         model_path = Path(model_dir) if model_dir else _default_model_dir()
@@ -160,12 +235,8 @@ class SmolVLAMyPolicy(BasePolicy):
         self.policy = SmolVLAPolicy.from_pretrained(str(model_path)).to(self.device)
         self.policy.eval()
 
-        self.preprocess, self.postprocess = make_pre_post_processors(
-            self.policy.config,
-            str(model_path),
-            preprocessor_overrides={
-                "device_processor": {"device": str(self.device)},
-            },
+        self.preprocess, self.postprocess = _load_pre_post_processors(
+            str(model_path), str(self.device)
         )
 
         self.instruction = ""
@@ -175,6 +246,11 @@ class SmolVLAMyPolicy(BasePolicy):
         self.policy.reset()
 
     def get_action(self, obs: dict[str, np.ndarray]) -> np.ndarray:
+        from lerobot.utils.constants import ACTION
+
+        # 新 chunk 生成直前かどうか（queue 空 = 次の select_action で推論が走る）
+        new_chunk = len(self.policy._queues[ACTION]) == 0
+
         frame = _to_preprocessor_frame(_build_lerobot_observation(obs, self.instruction))
         with torch.inference_mode():
             batch = self.preprocess(frame)
@@ -187,6 +263,11 @@ class SmolVLAMyPolicy(BasePolicy):
         action = np.asarray(action, dtype=np.float32).reshape(-1)
         if action.shape != (7,):
             raise ValueError(f"Expected action shape (7,), got {action.shape}")
+
+        if new_chunk:
+            scale = CHUNK_FIRST_STEP_ACTION_SCALE.get(self.instruction, 1.0)
+            action = _scale_action_motion(action, scale)
+
         return action
 
 

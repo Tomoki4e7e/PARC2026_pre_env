@@ -7,16 +7,24 @@ numpy>=1.19
 # SmolVLA 推論用
 # lerobot==0.6.0 は Python>=3.12 必須のため pip 不可。vendor/lerobot/ に同梱する。
 # 採点環境 (Python 3.10) では bundle_submission.sh で vendor を zip に含めること。
+#
+# 採点 venv: torch 2.11.0+cpu はベースイメージ側でプリインストール済み。
+#   - torch の pin / --extra-index-url は validate_submission で禁止
+#   - vendor/lerobot が torchvision.transforms.v2 を import するため torchvision は必須
+#   - torch 2.11.0 対応版（PyPI 標準 wheel、外部 index 不要）
+#   - torch 再インストールを避けるため、採点側 evaluate が torchvision を --no-deps で別途 install
+#   - requirements.txt に --no-deps 行を書くと K8s 静的検査で拒否される（torchvision の pin のみ記載）
+torchvision==0.26.0
 draccus
 einops
-gymnasium
 opencv-python-headless
 termcolor
 typing_extensions
-torchvision
 safetensors>=0.4
 transformers>=5.0,<6
 accelerate>=0.33
 peft>=0.13
 pillow>=10.0
 num2words
+# vendor/lerobot は policy 読み込み時に lerobot.envs 経由で gymnasium を import する
+gymnasium

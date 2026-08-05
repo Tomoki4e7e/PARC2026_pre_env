@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 results/
+work/
 venv/
 LIBERO-plus/
 assets.zip

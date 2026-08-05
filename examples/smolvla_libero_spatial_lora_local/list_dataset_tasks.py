@@ -54,7 +54,15 @@ def main() -> None:
         action="store_true",
         help="spatial のみ確認",
     )
+    parser.add_argument(
+        "--phase3",
+        action="store_true",
+        help="Phase 3 hold-out object/goal 弱点タスクのみ確認",
+    )
     args = parser.parse_args()
+
+    if args.phase3 and args.spatial_only:
+        parser.error("--phase3 と --spatial-only は同時に指定できません")
 
     ensure_work_dirs(config.WORK_DIR, config.HF_HOME, config.LEROBOT_CACHE)
     set_hf_env(config.HF_HOME, config.LEROBOT_CACHE)
@@ -80,7 +88,13 @@ def main() -> None:
         counts[task_name_from_cell(task_cell)] += 1
 
     available_norm = {normalize_task_name(name): name for name in counts}
-    suites = resolve_train_suites(args)
+    if args.phase3:
+        config.apply_phase3_config()
+        suites = list(config.PHASE3_TRAIN_SUITES)
+        overrides = config.PHASE3_TASK_EPISODE_OVERRIDES
+    else:
+        suites = resolve_train_suites(args)
+        overrides = config.TASK_EPISODE_OVERRIDES
 
     missing = 0
     for suite in suites:
@@ -94,9 +108,9 @@ def main() -> None:
                 missing += 1
                 print(f"  NG  {task_name!r} NOT FOUND")
 
-    if config.TASK_EPISODE_OVERRIDES:
+    if overrides:
         print("\n=== overrides ===")
-        for task_name, episode_count in config.TASK_EPISODE_OVERRIDES.items():
+        for task_name, episode_count in overrides.items():
             norm = normalize_task_name(task_name)
             if norm in available_norm:
                 actual = available_norm[norm]

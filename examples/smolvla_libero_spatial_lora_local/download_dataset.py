@@ -62,7 +62,15 @@ def main() -> None:
         action="store_true",
         help="spatial のみ取得",
     )
+    parser.add_argument(
+        "--phase3",
+        action="store_true",
+        help="Phase 3 hold-out object/goal 弱点タスクのみ取得",
+    )
     args = parser.parse_args()
+
+    if args.phase3 and args.spatial_only:
+        parser.error("--phase3 と --spatial-only は同時に指定できません")
 
     ensure_work_dirs(config.WORK_DIR, config.HF_HOME, config.LEROBOT_CACHE)
     set_hf_env(config.HF_HOME, config.LEROBOT_CACHE)
@@ -73,12 +81,19 @@ def main() -> None:
             "LeRobot が未セットアップです。setup_lerobot.sh を実行してください。"
         )
 
-    suites = resolve_train_suites(args)
+    if args.phase3:
+        config.apply_phase3_config()
+        suites = list(config.PHASE3_TRAIN_SUITES)
+        task_episode_overrides = config.PHASE3_TASK_EPISODE_OVERRIDES
+    else:
+        suites = resolve_train_suites(args)
+        task_episode_overrides = config.TASK_EPISODE_OVERRIDES
+
     episode_indices, selected_by_task = select_training_episodes(
         config.DATASET_REPO,
         config.DATASET_REVISION,
         suites,
-        task_episode_overrides=config.TASK_EPISODE_OVERRIDES,
+        task_episode_overrides=task_episode_overrides,
     )
     print(f"Suites: {[suite.name for suite in suites]}")
     print_episode_selection_summary(selected_by_task, suites)

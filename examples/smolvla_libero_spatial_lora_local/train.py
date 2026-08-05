@@ -5,14 +5,17 @@
     # 1) 環境構築（初回のみ）
     bash examples/smolvla_libero_spatial_lora_local/setup_lerobot.sh
 
-    # 2) 学習 + LoRA マージ（spatial + object + goal）
-    python examples/smolvla_libero_spatial_lora_local/train.py
+    # Phase 2: 第1段階 multi-suite 学習（spatial + object + goal, 740 ep）
+    python examples/smolvla_libero_spatial_lora_local/train.py --stage1
 
     # spatial のみ（従来互換）
     python examples/smolvla_libero_spatial_lora_local/train.py --spatial-only
 
     # Track 1 弱点 4 タスク特化（第2段階 LoRA）
     python examples/smolvla_libero_spatial_lora_local/train.py --track1-stage2
+
+    # Phase 3: hold-out object/goal 弱点 LoRA（stage2 merged ベース）
+    python examples/smolvla_libero_spatial_lora_local/train.py --phase3
 
     # 3) マージのみ再実行
     python examples/smolvla_libero_spatial_lora_local/merge_lora.py
@@ -266,14 +269,36 @@ def main() -> None:
         help="spatial のみ学習（従来互換）",
     )
     parser.add_argument(
+        "--stage1",
+        action="store_true",
+        help="第1段階 multi-suite LoRA（spatial+object+goal, 既定と同じ）",
+    )
+    parser.add_argument(
         "--track1-stage2",
         action="store_true",
         help="Track 1 弱点 4 タスク特化 LoRA（旧 merged をベース）",
     )
+    parser.add_argument(
+        "--phase3",
+        action="store_true",
+        help="hold-out object/goal 弱点 LoRA（stage2 merged をベース）",
+    )
     args = parser.parse_args()
 
+    stage_flags = sum(
+        int(x)
+        for x in (args.stage1, args.track1_stage2, args.phase3, args.spatial_only)
+    )
+    if stage_flags > 1:
+        parser.error(
+            "--stage1 / --track1-stage2 / --phase3 / --spatial-only は同時に指定できません"
+        )
+    if args.stage1 and args.track1_stage2:
+        parser.error("--stage1 と --track1-stage2 は同時に指定できません")
     if args.track1_stage2 and args.spatial_only:
         parser.error("--track1-stage2 と --spatial-only は同時に指定できません")
+    if args.stage1 and args.spatial_only:
+        parser.error("--stage1 と --spatial-only は同時に指定できません")
 
     log_path = args.log_file or (config.WORK_DIR / "train.log")
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,12 +328,19 @@ def main() -> None:
 
     sys.path.insert(0, str(lerobot_src))
 
-    if args.track1_stage2:
+    if args.phase3:
+        config.apply_phase3_config()
+        suites = list(config.PHASE3_TRAIN_SUITES)
+        task_episode_overrides = config.PHASE3_TASK_EPISODE_OVERRIDES
+        job_name = "smolvla_libero_plus_phase3_holdout_lora"
+    elif args.track1_stage2:
         config.apply_track1_stage2_config()
         suites = list(config.TRACK1_STAGE2_TRAIN_SUITES)
         task_episode_overrides = config.TRACK1_STAGE2_TASK_EPISODE_OVERRIDES
         job_name = "smolvla_libero_plus_track1_stage2_lora"
     else:
+        if args.stage1 or not args.spatial_only:
+            config.apply_stage1_config()
         suites = resolve_train_suites(args)
         task_episode_overrides = config.TASK_EPISODE_OVERRIDES
         if args.spatial_only:
@@ -340,8 +372,12 @@ def main() -> None:
     if not args.skip_merge:
         merge_script = SCRIPT_DIR / "merge_lora.py"
         merge_cmd = [sys.executable, str(merge_script)]
-        if args.track1_stage2:
+        if args.phase3:
+            merge_cmd.append("--phase3")
+        elif args.track1_stage2:
             merge_cmd.append("--track1-stage2")
+        elif args.stage1 or not args.spatial_only:
+            merge_cmd.append("--stage1")
         run_quiet(merge_cmd)
 
 

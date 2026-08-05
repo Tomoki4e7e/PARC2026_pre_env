@@ -10,10 +10,13 @@ alwaysApply: false
 
 ## 生成コマンド
 
+**詳細手順は `submission-bundle.mdc` を参照**（requirements / validate / よくある K8s エラー）。
+
 ```bash
 cd /mnt/robot_ssd/PARC2026_pre
 bash examples/smolvla_libero_spatial_lora_local/bundle_submission.sh
-# または submission_template/ から直接 zip した場合も同様
+source env.sh
+python validate_submission.py submission.zip --install --strict-deps   # 必須
 ```
 
 ## コピー先（固定）

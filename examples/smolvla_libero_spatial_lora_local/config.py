@@ -119,6 +119,37 @@ STAGE2_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_libero_plus_track1_stage2_lo
 STAGE2_MERGED_MODEL_DIR = WORK_DIR / "smolvla_libero_plus_track1_stage2_merged"
 STAGE2_BASE_MODEL_DIR = LEGACY_MERGED_MODEL_DIR
 
+# ── 第3段階: hold-out proxy 弱点（object / goal）LoRA ─────────────────────────
+# hold-out n=20 で弱かったベースタスクのみ追加学習。ベースは stage2 merged。
+PHASE3_OBJECT_TASK_NAMES = [
+    "pick up the alphabet soup and place it in the basket",
+    "pick up the butter and place it in the basket",
+    "pick up the ketchup and place it in the basket",
+]
+PHASE3_GOAL_TASK_NAMES = [
+    "open the middle drawer of the cabinet",
+    "turn on the stove",
+]
+
+PHASE3_TASK_EPISODE_OVERRIDES: dict[str, int] = {
+    "pick up the alphabet soup and place it in the basket": 50,
+    "pick up the butter and place it in the basket": 40,
+    "pick up the ketchup and place it in the basket": 40,
+    "open the middle drawer of the cabinet": 50,
+    "turn on the stove": 50,
+}
+
+PHASE3_STEPS = 10_000
+PHASE3_LEARNING_RATE = 1e-4
+PHASE3_FINAL_LEARNING_RATE = 1e-5
+PHASE3_LORA_R = 32
+PHASE3_LORA_ALPHA = 32
+PHASE3_FREEZE_VISION_ENCODER = True
+
+PHASE3_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_libero_plus_phase3_holdout_lora"
+PHASE3_MERGED_MODEL_DIR = WORK_DIR / "smolvla_libero_plus_phase3_holdout_merged"
+PHASE3_BASE_MODEL_DIR = STAGE2_MERGED_MODEL_DIR
+
 # ── train.py / merge_lora.py が参照するアクティブ設定（第1段階が既定） ───────
 STEPS = STAGE1_STEPS
 LOG_FREQ = 100
@@ -176,6 +207,37 @@ TRACK1_STAGE2_TRAIN_SUITES: tuple[TrainSuiteSpec, ...] = (
     ),
 )
 
+PHASE3_TRAIN_SUITES: tuple[TrainSuiteSpec, ...] = (
+    TrainSuiteSpec(
+        "object",
+        PHASE3_OBJECT_TASK_NAMES,
+        OBJECT_EPISODES_PER_TASK,
+    ),
+    TrainSuiteSpec(
+        "goal",
+        PHASE3_GOAL_TASK_NAMES,
+        GOAL_EPISODES_PER_TASK,
+    ),
+)
+
+
+def apply_stage1_config() -> None:
+    """第1段階 multi-suite LoRA 用に train/merge が参照する設定を復元する。"""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL
+
+    STEPS = STAGE1_STEPS
+    LEARNING_RATE = STAGE1_LEARNING_RATE
+    FINAL_LEARNING_RATE = STAGE1_FINAL_LEARNING_RATE
+    LORA_R = STAGE1_LORA_R
+    LORA_ALPHA = STAGE1_LORA_ALPHA
+    FREEZE_VISION_ENCODER = STAGE1_FREEZE_VISION_ENCODER
+    TRAIN_EXPERT_ONLY = not STAGE1_FREEZE_VISION_ENCODER
+    OUTPUT_DIR = STAGE1_OUTPUT_DIR
+    MERGED_MODEL_DIR = STAGE1_MERGED_MODEL_DIR
+    BASE_MODEL_LOCAL = None
+
 
 def apply_track1_stage2_config() -> None:
     """第2段階 Track 1 特化 LoRA 用に train/merge が参照する設定を上書き。"""
@@ -193,3 +255,21 @@ def apply_track1_stage2_config() -> None:
     OUTPUT_DIR = STAGE2_OUTPUT_DIR
     MERGED_MODEL_DIR = STAGE2_MERGED_MODEL_DIR
     BASE_MODEL_LOCAL = STAGE2_BASE_MODEL_DIR
+
+
+def apply_phase3_config() -> None:
+    """第3段階 hold-out object/goal 弱点 LoRA 用に train/merge が参照する設定を上書き。"""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL
+
+    STEPS = PHASE3_STEPS
+    LEARNING_RATE = PHASE3_LEARNING_RATE
+    FINAL_LEARNING_RATE = PHASE3_FINAL_LEARNING_RATE
+    LORA_R = PHASE3_LORA_R
+    LORA_ALPHA = PHASE3_LORA_ALPHA
+    FREEZE_VISION_ENCODER = PHASE3_FREEZE_VISION_ENCODER
+    TRAIN_EXPERT_ONLY = not PHASE3_FREEZE_VISION_ENCODER
+    OUTPUT_DIR = PHASE3_OUTPUT_DIR
+    MERGED_MODEL_DIR = PHASE3_MERGED_MODEL_DIR
+    BASE_MODEL_LOCAL = PHASE3_BASE_MODEL_DIR

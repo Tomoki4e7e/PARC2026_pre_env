@@ -1,0 +1,207 @@
+---
+description: Hold-out proxy 評価（example 4 以外の LIBERO-plus タスクで汎化差を測る）
+globs: results/**,examples/smolvla_libero_spatial_lora_local/deploy_model.sh,examples/smolvla_libero_spatial_lora_local/run_policy_server.sh,pipeline/**,compe/t1/**
+alwaysApply: false
+---
+
+# Hold-out Proxy 評価ワークフロー
+
+example 4 タスク（`libero_t1`）だけでは **本番（非公開タスク）への汎化** は判断できない。
+Hold-out proxy は **example 4 に対応する 4 ベースタスクを除いた** LIBERO-plus タスクで、
+multisuite vs stage2 等のモデルを **同条件比較** するためのローカル評価である。
+
+## 1. In-set と Hold-out の役割
+
+| 評価 | ベンチマーク | 用途 |
+|---|---|---|
+| **In-set** | `libero_t1`（example 4 タスク） | ローカル確認・過学習の兆候 |
+| **Hold-out proxy** | `libero_spatial` / `libero_object` / `libero_goal` | 汎化差・提出モデル選定 |
+
+本リポジトリは `LIBERO-plus` を使用するため、上記 3 suite には
+**摂動付きバリアント**（`_table_*` / `_light_*`）が含まれる。
+`--benchmark` で suite を切り替え、`--tasks` で評価タスクを絞る。
+
+## 2. 除外するベースタスク（Hold-out 定義）
+
+`compe/t1/T1_TASKS.csv` / 学習 `config.py` に対応する **4 ベースタスク** と、
+その **全摂動バリアント**（`_table_N`, `_light_N` 等）を Hold-out から除外する。
+
+| suite | 除外ベースタスク |
+|---|---|
+| spatial | `pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate` |
+| object | `pick up the tomato sauce and place it in the basket` |
+| object | `pick up the milk and place it in the basket` |
+| goal | `put the bowl on the stove` |
+
+## 3. 事前準備
+
+```bash
+cd /mnt/robot_ssd/PARC2026_pre
+source env.sh
+
+# ターミナル1: 評価対象モデルを deploy 済みであること
+bash examples/smolvla_libero_spatial_lora_local/deploy_model.sh multisuite
+# または: bash examples/smolvla_libero_spatial_lora_local/deploy_model.sh stage2
+
+bash examples/smolvla_libero_spatial_lora_local/run_policy_server.sh --port 8000
+```
+
+**モデル切替時は必ずサーバー再起動**（古い重みがメモリに残る）。
+
+モデル同一性の確認（提出物 vs work 内 merged）:
+
+```bash
+md5sum submission_template/model_weights/smolvla_spatial_lora/config.json \
+       examples/smolvla_libero_spatial_lora_local/work/smolvla_libero_plus_multisuite_merged/config.json
+# multisuite: freeze_vision_encoder=false, scheduler_decay_steps=40000, ~865MB
+# stage2:     freeze_vision_encoder=true,  scheduler_decay_steps=10000,  ~1.2GB
+```
+
+## 4. In-set 評価（比較のベースライン）
+
+```bash
+# ターミナル2
+source env.sh
+python -m pipeline \
+  --server-url http://localhost:8000 \
+  --track track1 \
+  --n-episodes 20 \
+  --seed 42 \
+  --output-dir results/inset_<variant>
+# 例: results/inset_multisuite/server_8000.json
+```
+
+`<variant>` は `multisuite` / `stage2` 等。実行後 JSON をリネームして上書きを防ぐ:
+
+```bash
+mv results/inset_multisuite/server_8000.json results/inset_multisuite/example4.json
+```
+
+## 5. Hold-out ミニセット（推奨・初回）
+
+各 suite 3 タスク × 10 ep ≒ **30〜60 分**。汎化差の方向性確認に十分。
+
+### 5.1 固定 9 タスク
+
+**spatial**（引き出しボウル除外）:
+
+- `pick_up_the_black_bowl_between_the_plate_and_the_ramekin_and_place_it_on_the_plate_table_2`
+- `pick_up_the_black_bowl_on_the_stove_and_place_it_on_the_plate_light_5`
+- `pick_up_the_black_bowl_from_table_center_and_place_it_on_the_plate_table_11`
+
+**object**（トマトソース・ミルク除外）:
+
+- `pick_up_the_alphabet_soup_and_place_it_in_the_basket_table_1`
+- `pick_up_the_ketchup_and_place_it_in_the_basket_light_2`
+- `pick_up_the_butter_and_place_it_in_the_basket_table_5`
+
+**goal**（ボウル→コンロ除外）:
+
+摂動番号は連番ではない（例: spatial の `table_center` は `table_1` ではなく `table_11` から）。
+実行前に §8 の確認スクリプトで実在を確認すること。
+
+- `open_the_middle_drawer_of_the_cabinet_table_1`
+- `turn_on_the_stove_light_2`
+- `put_the_bowl_on_the_plate_table_3`
+
+### 5.2 実行コマンド
+
+```bash
+OUT=results/holdout_<variant>   # 例: holdout_multisuite
+mkdir -p "$OUT"
+
+python -m pipeline --server-url http://localhost:8000 --track track1 \
+  --benchmark libero_spatial --n-episodes 10 --seed 42 --output-dir "$OUT" \
+  --tasks \
+    pick_up_the_black_bowl_between_the_plate_and_the_ramekin_and_place_it_on_the_plate_table_2 \
+    pick_up_the_black_bowl_on_the_stove_and_place_it_on_the_plate_light_5 \
+    pick_up_the_black_bowl_from_table_center_and_place_it_on_the_plate_table_11
+mv "$OUT/server_8000.json" "$OUT/spatial.json"
+
+python -m pipeline --server-url http://localhost:8000 --track track1 \
+  --benchmark libero_object --n-episodes 10 --seed 42 --output-dir "$OUT" \
+  --tasks \
+    pick_up_the_alphabet_soup_and_place_it_in_the_basket_table_1 \
+    pick_up_the_ketchup_and_place_it_in_the_basket_light_2 \
+    pick_up_the_butter_and_place_it_in_the_basket_table_5
+mv "$OUT/server_8000.json" "$OUT/object.json"
+
+python -m pipeline --server-url http://localhost:8000 --track track1 \
+  --benchmark libero_goal --n-episodes 10 --seed 42 --output-dir "$OUT" \
+  --tasks \
+    open_the_middle_drawer_of_the_cabinet_table_1 \
+    turn_on_the_stove_light_2 \
+    put_the_bowl_on_the_plate_table_3
+mv "$OUT/server_8000.json" "$OUT/goal.json"
+```
+
+**注意**: 同一 `--output-dir` + 同一ポートでは `server_8000.json` が上書きされる。suite ごとに `mv` すること。
+
+## 6. 2 モデル比較の標準手順
+
+```text
+1. deploy_model.sh multisuite → サーバー再起動
+2. In-set（example 4, 20 ep）→ results/inset_multisuite/example4.json
+3. Hold-out ミニ 9 タスク → results/holdout_multisuite/{spatial,object,goal}.json
+
+4. deploy_model.sh stage2 → サーバー再起動
+5. 手順 2〜3 を同じ seed=42・同タスクで繰り返し
+
+6. 下記スコア式で提出モデルを決定
+```
+
+## 7. 結果の読み方とモデル選定
+
+各 JSON の `tracks[0].overall_score` = その run の **タスク平均成功率**。
+
+| パターン | 解釈 |
+|---|---|
+| example 4: stage2 > multisuite、hold-out: multisuite > stage2 | stage2 は in-set 過学習。本番向きは multisuite |
+| 両方 multisuite が上 | multisuite を提出 |
+| 両方 stage2 が上 | stage2 も検討（ただし本番非公開タスクでは hold-out の方が信頼できる） |
+
+### 提出モデル選定の目安
+
+```text
+proxy_score = 0.4 × example4平均 + 0.6 × hold-out平均
+```
+
+本番は非公開タスクが主のため **hold-out 側を重く** する（重みは調整可）。
+
+Hold-out 9 タスク平均の算出: `spatial.json` / `object.json` / `goal.json` の
+各 `tracks[0].overall_score` を算術平均（または 9 タスクをプールして再平均）。
+
+タスク別では `success_rate` と `collision_rate` を必ず確認する。
+
+## 8. タスク名の確認
+
+存在しない `--tasks` 名を指定すると、利用可能タスク一覧付きでエラーになる。
+
+```bash
+source env.sh
+python - <<'PY'
+from pipeline.environment import EnvironmentManager
+from pipeline.config import EvalConfig
+em = EnvironmentManager(EvalConfig())
+for bench in ["libero_spatial", "libero_object", "libero_goal"]:
+    names = [t.name for t in em.get_task_infos(bench)]
+    print(bench, len(names), "例:", names[0])
+PY
+```
+
+## 9. 限界と注意点
+
+1. **本番そのものではない** — 非公開タスクの完全再現は不可。proxy は相対比較用。
+2. **instruction 形式** — hold-out では `pick up ... table 1` のように摂動名が instruction に入る場合がある。`INSTRUCTION_ALIASES`（example 4 用）は効かないが、両モデル同条件のため比較は公平。
+3. **評価時間** — 9 タスク × 10 ep ≒ 30〜60 分。信頼性を上げるなら `--n-episodes 20`。
+4. **全摂動評価は不要** — 1 suite あたり 2000+ バリアントがある。ミニセットまたはベース 26 タスク × 1 バリアントで十分。
+5. **サーバー再起動** — deploy 後に評価しないと wrong model になる。
+6. **タスク名エラー時** — 存在しない `--tasks` 指定だと評価は走らず、JSON は `error: 1.0`, `tasks: []`, 合計時間 ~1秒 になる。スコア 0.000 はモデル性能ではない。
+
+## 10. エージェント向け
+
+- example 4 だけ高いモデルを「本番向き」と判断しない。hold-out proxy を必ず併記する。
+- モデル比較は **同一 seed・同一タスク・同一 n-episodes** を厳守する。
+- 評価 JSON は suite 別ファイルに分け、上書きを防ぐ。
+- multisuite vs stage2 で example 4 差が小さくても、hold-out 差が大きい場合がある。
+- 提出前は in-set + hold-out の両方を記録し、`track1-improvement-workflow` の Phase 3（第2段階 LoRA）判断材料にする。

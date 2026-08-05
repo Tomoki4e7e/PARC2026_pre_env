@@ -1,0 +1,134 @@
+---
+description: 提出 zip 作成・検証・配置の必須手順（採点 K8s 失敗を防ぐ）
+globs: submission_template/**,examples/smolvla_libero_spatial_lora_local/bundle_submission.sh,examples/smolvla_libero_spatial_lora_local/deploy_model.sh,validate_submission.py,submission.zip
+alwaysApply: false
+---
+
+# 提出物（submission.zip）作成ルール
+
+採点 K8s は **専用 venv** に `requirements.txt` を `pip install` してから
+`policy_server.py` を起動する。**ローカル SmolVLA 環境と採点 venv は別物**。
+
+## 1. 採点環境の前提
+
+| 項目 | 採点 venv | 禁止 |
+|---|---|---|
+| Python | 3.10 | — |
+| torch | **2.11.0+cpu プリインストール** | `torch` の pin、`--extra-index-url` |
+| 外部通信 | `pip install` 時のみ PyPI | `git+https://…`、`--index-url` |
+| LeRobot | zip 内 `vendor/lerobot/` | `lerobot==0.6.0`（Py3.12 必須） |
+
+## 2. requirements.txt の必須ルール
+
+### 禁止（validate_submission で ERROR）
+
+- `--extra-index-url` / `--index-url` / `-f` / `-e` 等
+- `git+https://…` や URL 直接指定
+- ローカルパス（`./foo`）
+
+### 必須
+
+```text
+torchvision==0.26.0
+gymnasium
+```
+
+`gymnasium` は `SmolVLAPolicy` の import 連鎖
+（`policies/pretrained.py` → `configs/train.py` → `lerobot.envs` → `import gymnasium`）で必須。
+推論では使わないが、省略すると採点 venv で起動時に `ModuleNotFoundError` になる（2026-08 失敗事例）。
+
+**禁止:** `requirements.txt` に `--no-deps` 行を書かない（K8s 静的検査 `req.unknown_option` で拒否される）。
+`torchvision` は採点側 `evaluate.sh` が `--no-deps` 付きで別途 install する。
+
+**理由（K8s 失敗事例）:**
+
+1. `torchvision` を省略 → `ModuleNotFoundError: No module named 'torchvision'`
+   （vendor lerobot が `from torchvision.transforms import v2` を import）
+2. `--extra-index-url` で torch CPU wheel を入れる → 静的検査 ERROR
+3. `torch` を pin すると PyPI から CUDA 版が入り、CPU 採点で壊れる可能性
+4. `requirements.txt` に `--no-deps` 行 → K8s 静的検査 ERROR（2026-08 失敗事例）
+5. 採点 venv の `torch 2.11.0+cpu` は `torchvision==0.26.0` の deps として満たされる想定
+
+`torch` 行は **書かない**（採点側プリインストールを使う）。
+
+### 推奨テンプレート（SmolVLA）
+
+`submission_template/requirements.txt` を正とする。変更時は multisuite / stage2 共通。
+
+## 3. zip 作成手順（毎回この順序）
+
+```bash
+cd /mnt/robot_ssd/PARC2026_pre
+
+# 1) 提出モデルを submission_template へ配置
+bash examples/smolvla_libero_spatial_lora_local/deploy_model.sh multisuite
+# または: deploy_model.sh stage2
+
+# 2) vendor 同梱 + zip 生成
+bash examples/smolvla_libero_spatial_lora_local/bundle_submission.sh
+
+# 3) 採点同等の検証（必須・--install --strict-deps 付き）
+#    展開先は robot_ssd 上 work/validate_submission_tmp/（/tmp 満杯対策）
+source env.sh
+python validate_submission.py submission.zip --install --strict-deps
+
+# 4) ext4 へコピー（submission-zip-copy ルール）
+mkdir -p ~/PARC2026_submission
+cp -f submission.zip ~/PARC2026_submission/submission.zip
+```
+
+**PASS（errors=0）を確認してから Omnicampus 提出する。**
+
+## 4. 検証コマンドの使い分け
+
+| コマンド | 用途 |
+|---|---|
+| `validate_submission.py submission.zip --install --strict-deps` | **提出前必須**（parc2026 / Py3.10、採点同等） |
+| `validate_submission.sh submission.zip` | SmolVLA conda 向けスモーク（`--install` 不可・torch 破壊） |
+| `validate_submission.py submission.zip --static` | 高速静的チェックのみ（依存 import 未確認） |
+
+`--install` なし PASS だけでは **torchvision 欠落は検出できない** 場合がある。
+必ず `--install` でサーバー起動まで確認する。
+
+`--strict-deps` は `requirements.txt` の dist とその推移的依存だけを import 可能にし、
+それ以外の site-packages を「未インストール」に見せてサーバーを起動する。
+parc2026 環境には評価パイプライン用の余剰パッケージ（gymnasium・robosuite 等）が入っており、
+**`--install` だけでは依存漏れを見逃す**（gymnasium 欠落の 2026-08 失敗事例はこれで素通りした）。
+
+## 5. zip に含めるもの
+
+| パス | 必須 |
+|---|---|
+| `policy_server.py` | ✓ |
+| `requirements.txt` | ✓ |
+| `smolvla_mypolicy.py` | ✓（MyPolicy 実装） |
+| `lerobot_bootstrap.py` | ✓ |
+| `vendor/lerobot/` | ✓（`bundle_submission.sh` が同期） |
+| `model_weights/smolvla_spatial_lora/` | ✓ |
+
+## 6. モデル切替時の注意
+
+- `deploy_model.sh` 後は **ポリシーサーバー再起動**（メモリ上の旧重み）
+- zip 再生成後は **必ず再 validate + コピー**
+- モデル選定は `hold-out-proxy-evaluation.mdc` の proxy_score を参照
+
+## 7. エージェント向けチェックリスト
+
+提出 zip を生成したら以下をすべて満たすこと:
+
+- [ ] `requirements.txt` に `torchvision==0.26.0` と `gymnasium` がある（`--no-deps` 行は **ない**）
+- [ ] `requirements.txt` に `--extra-index-url` / `torch==…` が **ない**
+- [ ] `bundle_submission.sh` 実行済み
+- [ ] `validate_submission.py submission.zip --install --strict-deps` が **PASS**
+- [ ] `~/PARC2026_submission/submission.zip` にコピー済み
+- [ ] 使用モデル（multisuite / stage2）をユーザーに明示
+
+## 8. よくある K8s エラーと対策
+
+| エラー | 原因 | 対策 |
+|---|---|---|
+| `No module named 'torchvision'` | requirements から torchvision 削除 | §2 テンプレートを復元 |
+| `No module named 'gymnasium'` | requirements に gymnasium が無い | §2 テンプレートを復元し `--strict-deps` で再検証 |
+| `req.external_option` | `--extra-index-url` | 削除し torchvision のみ PyPI から |
+| ポリシーサーバー起動失敗（import 連鎖） | vendor 未同梱 / patch 未適用 | `bundle_submission.sh` 再実行 |
+| スコア 0%・起動タイムアウト | 上記の依存不足 | `--install` 検証を省略しない |

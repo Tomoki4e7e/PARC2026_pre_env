@@ -5,7 +5,10 @@ Colab ノートブック §9 相当。train.py 完了後、または単独で実
 
 使い方:
     python examples/smolvla_libero_spatial_lora_local/merge_lora.py
+    python examples/smolvla_libero_spatial_lora_local/merge_lora.py --stage1
     python examples/smolvla_libero_spatial_lora_local/merge_lora.py --track1-stage2
+    python examples/smolvla_libero_spatial_lora_local/merge_lora.py --phase3
+    python examples/smolvla_libero_spatial_lora_local/merge_lora.py --stage1 --steps 20000
 """
 
 from __future__ import annotations
@@ -56,14 +59,40 @@ def resolve_base_model_local() -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description="LoRA アダプタをベース重みへマージ")
     parser.add_argument(
+        "--stage1",
+        action="store_true",
+        help="第1段階 multi-suite LoRA 出力をマージする",
+    )
+    parser.add_argument(
         "--track1-stage2",
         action="store_true",
         help="第2段階 Track 1 LoRA 出力をマージする",
     )
+    parser.add_argument(
+        "--phase3",
+        action="store_true",
+        help="第3段階 hold-out object/goal LoRA 出力をマージする",
+    )
+    parser.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="マージする checkpoint step（未指定時は config.STEPS）",
+    )
     args = parser.parse_args()
 
-    if args.track1_stage2:
+    stage_flags = sum(int(x) for x in (args.stage1, args.track1_stage2, args.phase3))
+    if stage_flags > 1:
+        parser.error("--stage1 / --track1-stage2 / --phase3 は同時に指定できません")
+
+    if args.phase3:
+        config.apply_phase3_config()
+    elif args.track1_stage2:
         config.apply_track1_stage2_config()
+    elif args.stage1:
+        config.apply_stage1_config()
+
+    merge_steps = args.steps if args.steps is not None else config.STEPS
 
     ensure_work_dirs(config.WORK_DIR, config.HF_HOME, config.LEROBOT_CACHE)
     set_hf_env(config.HF_HOME, config.LEROBOT_CACHE)
@@ -79,7 +108,7 @@ def main() -> None:
     checkpoint_dir = (
         config.OUTPUT_DIR
         / "checkpoints"
-        / f"{config.STEPS:06d}"
+        / f"{merge_steps:06d}"
         / "pretrained_model"
     )
     if not (checkpoint_dir / "adapter_model.safetensors").is_file():
@@ -97,7 +126,7 @@ def main() -> None:
                 )
                 if (fallback / "adapter_model.safetensors").is_file():
                     print(
-                        f"Checkpoint {config.STEPS:06d} not found; "
+                        f"Checkpoint {merge_steps:06d} not found; "
                         f"using latest {latest:06d}"
                     )
                     checkpoint_dir = fallback

@@ -50,7 +50,15 @@ fi
 # --- ステップ 2: 追加依存のインストール ---
 if [ -f "$SUBMISSION_DIR/requirements.txt" ]; then
     echo "[evaluate] 追加依存をインストール"
-    pip install -q -r "$SUBMISSION_DIR/requirements.txt"
+    if grep -qE '^torchvision' "$SUBMISSION_DIR/requirements.txt"; then
+        grep -vE '^(--no-deps|torchvision)' "$SUBMISSION_DIR/requirements.txt" \
+            > "$SUBMISSION_DIR/.requirements_base.txt"
+        pip install -q -r "$SUBMISSION_DIR/.requirements_base.txt"
+        tv_spec="$(grep -E '^torchvision' "$SUBMISSION_DIR/requirements.txt" | head -1)"
+        pip install -q --no-deps "$tv_spec"
+    else
+        pip install -q -r "$SUBMISSION_DIR/requirements.txt"
+    fi
 fi
 
 # --- ステップ 3: ポリシーサーバーの起動 ---
