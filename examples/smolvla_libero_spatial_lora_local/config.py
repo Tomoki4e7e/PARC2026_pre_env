@@ -18,8 +18,10 @@ LEROBOT_CACHE = WORK_DIR / "lerobot_cache"
 BASE_MODEL_REPO = "lerobot/smolvla_libero_plus"
 BASE_MODEL_REVISION = "7bb70aa5bc92b82c9239142775d3a173103567ff"
 VLM_REPO = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
-DATASET_REPO = "lerobot/libero_plus"
-DATASET_REVISION = "f3f49f426d75030177b18778374005bc12ccd588"
+LIBERO_PLUS_DATASET_REPO = "lerobot/libero_plus"
+LIBERO_PLUS_DATASET_REVISION = "f3f49f426d75030177b18778374005bc12ccd588"
+DATASET_REPO = LIBERO_PLUS_DATASET_REPO
+DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
 
 SPATIAL_TASK_NAMES = [
     "pick up the black bowl from table center and place it on the plate",
@@ -150,6 +152,28 @@ PHASE3_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_libero_plus_phase3_holdout_l
 PHASE3_MERGED_MODEL_DIR = WORK_DIR / "smolvla_libero_plus_phase3_holdout_merged"
 PHASE3_BASE_MODEL_DIR = STAGE2_MERGED_MODEL_DIR
 
+# ── 第4段階: LIBERO-90 多様タスク + 既知40 replay LoRA ───────────────────────
+# prepare_diverse_retrain_data.py が作るローカル集約データセットを使う。
+# v2: replay 比率↑・steps 短縮・base normalizer 固定・checkpoint は proxy 選定。
+PHASE4_DATASET_REPO = "local/libero_diverse_retrain"
+PHASE4_DATASET_ROOT = WORK_DIR / "datasets" / "libero_diverse_retrain"
+PHASE4_MANIFEST_PATH = WORK_DIR / "diverse_retrain_manifest.json"
+PHASE4_STEPS = 5_000
+PHASE4_SAVE_FREQ = 1_000
+PHASE4_LEARNING_RATE = 5e-5
+PHASE4_FINAL_LEARNING_RATE = 5e-6
+PHASE4_LORA_R = 16
+PHASE4_LORA_ALPHA = 16
+PHASE4_FREEZE_VISION_ENCODER = True
+# 学習 episode のうち replay（既知 suite）の目標比率。diverse 側を間引いて達成する。
+PHASE4_TARGET_REPLAY_FRACTION = 0.55
+# True なら学習・merge 後とも stage2 base の normalizer stats を使う。
+PHASE4_PRESERVE_BASE_NORMALIZER = True
+PHASE4_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_libero_diverse_phase4_v2_lora"
+PHASE4_MERGED_MODEL_DIR = WORK_DIR / "smolvla_libero_diverse_phase4_v2_merged"
+# stage2 merged をベースにしないと Track1 / hold-out 能力が HF 素モデルへ巻き戻る。
+PHASE4_BASE_MODEL_DIR: Path | None = WORK_DIR / "smolvla_libero_plus_track1_stage2_merged"
+
 # ── train.py / merge_lora.py が参照するアクティブ設定（第1段階が既定） ───────
 STEPS = STAGE1_STEPS
 LOG_FREQ = 100
@@ -160,6 +184,7 @@ WARMUP_STEPS = 100
 LORA_R = STAGE1_LORA_R
 LORA_ALPHA = STAGE1_LORA_ALPHA
 SEED = 42
+SAVE_FREQ: int | None = None
 
 FREEZE_VISION_ENCODER = STAGE1_FREEZE_VISION_ENCODER
 TRAIN_EXPERT_ONLY = not FREEZE_VISION_ENCODER
@@ -169,6 +194,8 @@ MERGED_MODEL_DIR = STAGE1_MERGED_MODEL_DIR
 
 # ローカル merged モデルをベースにする場合（第2段階 LoRA）。None なら HF から取得。
 BASE_MODEL_LOCAL: Path | None = None
+# ローカル LeRobot データセット root（phase4）。None なら HF repo のみ。
+DATASET_ROOT: Path | None = None
 
 # Colab は torchcodec だが、ローカルでは libffi / FFmpeg 競合を避け pyav を使う
 VIDEO_BACKEND = "pyav"
@@ -225,7 +252,8 @@ def apply_stage1_config() -> None:
     """第1段階 multi-suite LoRA 用に train/merge が参照する設定を復元する。"""
     global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
     global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
-    global BASE_MODEL_LOCAL
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION
 
     STEPS = STAGE1_STEPS
     LEARNING_RATE = STAGE1_LEARNING_RATE
@@ -237,13 +265,18 @@ def apply_stage1_config() -> None:
     OUTPUT_DIR = STAGE1_OUTPUT_DIR
     MERGED_MODEL_DIR = STAGE1_MERGED_MODEL_DIR
     BASE_MODEL_LOCAL = None
+    DATASET_ROOT = None
+    SAVE_FREQ = None
+    DATASET_REPO = LIBERO_PLUS_DATASET_REPO
+    DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
 
 
 def apply_track1_stage2_config() -> None:
     """第2段階 Track 1 特化 LoRA 用に train/merge が参照する設定を上書き。"""
     global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
     global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
-    global BASE_MODEL_LOCAL
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION
 
     STEPS = STAGE2_STEPS
     LEARNING_RATE = STAGE2_LEARNING_RATE
@@ -255,13 +288,18 @@ def apply_track1_stage2_config() -> None:
     OUTPUT_DIR = STAGE2_OUTPUT_DIR
     MERGED_MODEL_DIR = STAGE2_MERGED_MODEL_DIR
     BASE_MODEL_LOCAL = STAGE2_BASE_MODEL_DIR
+    DATASET_ROOT = None
+    SAVE_FREQ = None
+    DATASET_REPO = LIBERO_PLUS_DATASET_REPO
+    DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
 
 
 def apply_phase3_config() -> None:
     """第3段階 hold-out object/goal 弱点 LoRA 用に train/merge が参照する設定を上書き。"""
     global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
     global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
-    global BASE_MODEL_LOCAL
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION
 
     STEPS = PHASE3_STEPS
     LEARNING_RATE = PHASE3_LEARNING_RATE
@@ -273,3 +311,30 @@ def apply_phase3_config() -> None:
     OUTPUT_DIR = PHASE3_OUTPUT_DIR
     MERGED_MODEL_DIR = PHASE3_MERGED_MODEL_DIR
     BASE_MODEL_LOCAL = PHASE3_BASE_MODEL_DIR
+    DATASET_ROOT = None
+    SAVE_FREQ = None
+    DATASET_REPO = LIBERO_PLUS_DATASET_REPO
+    DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
+
+
+def apply_phase4_config() -> None:
+    """第4段階 LIBERO-90 多様タスク + replay LoRA 用に train/merge 設定を上書き。"""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION
+
+    STEPS = PHASE4_STEPS
+    LEARNING_RATE = PHASE4_LEARNING_RATE
+    FINAL_LEARNING_RATE = PHASE4_FINAL_LEARNING_RATE
+    LORA_R = PHASE4_LORA_R
+    LORA_ALPHA = PHASE4_LORA_ALPHA
+    FREEZE_VISION_ENCODER = PHASE4_FREEZE_VISION_ENCODER
+    TRAIN_EXPERT_ONLY = not PHASE4_FREEZE_VISION_ENCODER
+    OUTPUT_DIR = PHASE4_OUTPUT_DIR
+    MERGED_MODEL_DIR = PHASE4_MERGED_MODEL_DIR
+    BASE_MODEL_LOCAL = PHASE4_BASE_MODEL_DIR
+    DATASET_ROOT = PHASE4_DATASET_ROOT
+    SAVE_FREQ = PHASE4_SAVE_FREQ
+    DATASET_REPO = PHASE4_DATASET_REPO
+    DATASET_REVISION = None

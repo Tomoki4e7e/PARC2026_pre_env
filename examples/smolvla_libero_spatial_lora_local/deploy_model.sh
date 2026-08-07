@@ -33,9 +33,25 @@ case "$VARIANT" in
   phase3)
     SRC="$WORK/smolvla_libero_plus_phase3_holdout_merged"
     ;;
+  phase4)
+    # v2（proxy 選定・normalizer 固定）を優先。無ければ from_stage2 / legacy へフォールバック。
+    SRC="$WORK/smolvla_libero_diverse_phase4_v2_merged"
+    if [ ! -f "$SRC/config.json" ]; then
+      SRC="$WORK/smolvla_libero_diverse_phase4_from_stage2_merged"
+    fi
+    if [ ! -f "$SRC/config.json" ]; then
+      SRC="$WORK/smolvla_libero_diverse_phase4_merged"
+    fi
+    ;;
+  phase4_v2)
+    SRC="$WORK/smolvla_libero_diverse_phase4_v2_merged"
+    ;;
+  phase4_legacy)
+    SRC="$WORK/smolvla_libero_diverse_phase4_merged"
+    ;;
   *)
     echo "[deploy] ERROR: unknown variant '$VARIANT'"
-    echo "  use: base, multisuite, spatial, stage2, phase3"
+    echo "  use: base, multisuite, spatial, stage2, phase3, phase4, phase4_v2, phase4_legacy"
     exit 1
     ;;
 esac
@@ -60,7 +76,8 @@ if [ ! -d "$DEST" ]; then
     mkdir -p "$DEST"
 fi
 rsync -aL --delete --exclude 'train_config.json' "$SRC/" "$DEST/"
-cp "$SCRIPT_DIR/smolvla_mypolicy.py" "$SUB/smolvla_mypolicy.py"
+# policy 実装は submission_template 側を正とする。examples/ の古い写しで上書きすると、
+# instruction safety 等の提出修正が失われるため、ここでは重みだけを切り替える。
 
 echo "[deploy] 完了 ($(du -sh "$DEST" | cut -f1))"
 echo ""

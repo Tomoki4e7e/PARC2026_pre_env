@@ -17,6 +17,7 @@ import argparse
 import contextlib
 import gc
 import io
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -30,7 +31,40 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import config
-from utils import cached_or_downloaded_snapshot, ensure_work_dirs, set_hf_env
+from utils import (
+    cached_or_downloaded_snapshot,
+    copy_processors_from_model,
+    ensure_work_dirs,
+    set_hf_env,
+)
+
+
+def _canonicalize_visual_shapes(model_dir: Path) -> None:
+    """LeRobot dataset metadata が HWC でも読み込みは CHW のため、推論設定を CHW に揃える。"""
+    pre_path = model_dir / "policy_preprocessor.json"
+    if pre_path.is_file():
+        pre = json.loads(pre_path.read_text())
+        for step in pre.get("steps", []):
+            if step.get("registry_name") != "normalizer_processor":
+                continue
+            for key, feat in step["config"]["features"].items():
+                if not key.startswith("observation.images."):
+                    continue
+                shape = feat["shape"]
+                if len(shape) == 3 and shape[-1] in (1, 3, 4) and shape[0] != 3:
+                    feat["shape"] = [shape[2], shape[0], shape[1]]
+        pre_path.write_text(json.dumps(pre, indent=2) + "\n")
+
+    cfg_path = model_dir / "config.json"
+    if cfg_path.is_file():
+        cfg = json.loads(cfg_path.read_text())
+        for key, feat in cfg.get("input_features", {}).items():
+            if not key.startswith("observation.images."):
+                continue
+            shape = feat.get("shape")
+            if shape and len(shape) == 3 and shape[-1] in (1, 3, 4) and shape[0] != 3:
+                feat["shape"] = [shape[2], shape[0], shape[1]]
+        cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
 
 
 def resolve_base_model_local() -> Path:
@@ -74,6 +108,11 @@ def main() -> None:
         help="第3段階 hold-out object/goal LoRA 出力をマージする",
     )
     parser.add_argument(
+        "--phase4",
+        action="store_true",
+        help="第4段階 LIBERO-90 多様タスク LoRA 出力をマージする",
+    )
+    parser.add_argument(
         "--steps",
         type=int,
         default=None,
@@ -81,11 +120,17 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    stage_flags = sum(int(x) for x in (args.stage1, args.track1_stage2, args.phase3))
+    stage_flags = sum(
+        int(x) for x in (args.stage1, args.track1_stage2, args.phase3, args.phase4)
+    )
     if stage_flags > 1:
-        parser.error("--stage1 / --track1-stage2 / --phase3 は同時に指定できません")
+        parser.error(
+            "--stage1 / --track1-stage2 / --phase3 / --phase4 は同時に指定できません"
+        )
 
-    if args.phase3:
+    if args.phase4:
+        config.apply_phase4_config()
+    elif args.phase3:
         config.apply_phase3_config()
     elif args.track1_stage2:
         config.apply_track1_stage2_config()
@@ -182,6 +227,17 @@ def main() -> None:
     ]:
         for source_path in checkpoint_dir.glob(pattern):
             shutil.copy2(source_path, config.MERGED_MODEL_DIR / source_path.name)
+
+    # Phase4 v2: 学習中に dataset stats を注入しても、最終は base normalizer を正とする。
+    if (
+        getattr(config, "PHASE4_PRESERVE_BASE_NORMALIZER", False)
+        and args.phase4
+        and (base_model_local / "policy_preprocessor.json").is_file()
+    ):
+        copy_processors_from_model(base_model_local, config.MERGED_MODEL_DIR)
+        print(f"Preserved base normalizer from: {base_model_local}")
+
+    _canonicalize_visual_shapes(config.MERGED_MODEL_DIR)
 
     merged_weights_path = config.MERGED_MODEL_DIR / "model.safetensors"
     with safe_open(merged_weights_path, framework="pt", device="cpu") as weights:

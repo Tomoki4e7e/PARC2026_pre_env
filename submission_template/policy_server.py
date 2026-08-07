@@ -143,10 +143,23 @@ def health():
 async def reset_policy(request: Request):
     body = await request.body()
     instruction = ""
+    seed = None
     if body:
         import json
         data = json.loads(body)
         instruction = data.get("instruction", "")
+        seed = data.get("seed")
+    if seed is not None:
+        seed = int(seed)
+        np.random.seed(seed)
+        try:
+            import torch
+
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
+        except ImportError:
+            pass
     _policy.reset(instruction=instruction)
     return {"status": "ok"}
 

@@ -17,6 +17,9 @@
     # Phase 3: hold-out object/goal 弱点 LoRA（stage2 merged ベース）
     python examples/smolvla_libero_spatial_lora_local/train.py --phase3
 
+    # Phase 4: LIBERO-90 多様タスク + replay LoRA（OOD early stopping 用）
+    python examples/smolvla_libero_spatial_lora_local/train.py --phase4 --skip-merge
+
     # 3) マージのみ再実行
     python examples/smolvla_libero_spatial_lora_local/merge_lora.py
 """
@@ -46,12 +49,48 @@ import config
 from utils import (
     cached_or_downloaded_snapshot,
     ensure_work_dirs,
+    inject_model_stats_into_dataset,
     prefetch_dataset,
     print_episode_selection_summary,
+    restore_dataset_stats_backup,
     run_quiet,
+    select_phase4_mixture_episodes,
     select_training_episodes,
     set_hf_env,
 )
+
+
+def load_phase4_episode_indices() -> list[int]:
+    import json
+
+    manifest_path = config.PHASE4_MANIFEST_PATH
+    if not manifest_path.is_file():
+        raise FileNotFoundError(
+            f"Phase4 manifest がありません: {manifest_path}\n"
+            "先に prepare_diverse_retrain_data.py --prepare を実行してください。"
+        )
+    if config.PHASE4_DATASET_ROOT is None or not (
+        config.PHASE4_DATASET_ROOT / "meta" / "info.json"
+    ).is_file():
+        raise FileNotFoundError(
+            f"Phase4 dataset がありません: {config.PHASE4_DATASET_ROOT}\n"
+            "先に prepare_diverse_retrain_data.py --prepare を実行してください。"
+        )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    episodes, summary = select_phase4_mixture_episodes(
+        manifest,
+        target_replay_fraction=config.PHASE4_TARGET_REPLAY_FRACTION,
+    )
+    if not episodes:
+        raise RuntimeError("Phase4 manifest に学習 episode がありません。")
+    print(
+        "Phase4 mixture (replay-up): "
+        f"diverse {summary['diverse_kept']}/{summary['diverse_available']}, "
+        f"replay {summary['replay_kept']}, total {summary['total']}, "
+        f"replay_frac={summary['replay_fraction']:.3f} "
+        f"(target={summary['target_replay_fraction']:.3f})"
+    )
+    return episodes
 
 
 def _require_gpu() -> None:
@@ -142,8 +181,12 @@ def build_train_command(
     job_name: str,
 ) -> list[str]:
     episodes_json = "[" + ",".join(map(str, episode_indices)) + "]"
-    save_freq = max(config.LOG_FREQ, config.STEPS // 4)
-    return [
+    save_freq = (
+        config.SAVE_FREQ
+        if config.SAVE_FREQ is not None
+        else max(config.LOG_FREQ, config.STEPS // 4)
+    )
+    command = [
         "lerobot-train",
         f"--policy.path={base_model_local}",
         f"--policy.vlm_model_name={config.VLM_REPO}",
@@ -159,7 +202,6 @@ def build_train_command(
         f"--policy.scheduler_warmup_steps={config.WARMUP_STEPS}",
         f"--policy.scheduler_decay_steps={config.STEPS}",
         f"--dataset.repo_id={config.DATASET_REPO}",
-        f"--dataset.revision={config.DATASET_REVISION}",
         f"--dataset.episodes={episodes_json}",
         "--dataset.use_imagenet_stats=false",
         f"--dataset.video_backend={config.VIDEO_BACKEND}",
@@ -181,6 +223,11 @@ def build_train_command(
         f"--peft.r={config.LORA_R}",
         f"--peft.lora_alpha={config.LORA_ALPHA}",
     ]
+    if config.DATASET_ROOT is not None:
+        command.append(f"--dataset.root={config.DATASET_ROOT}")
+    elif config.DATASET_REVISION is not None:
+        command.append(f"--dataset.revision={config.DATASET_REVISION}")
+    return command
 
 
 def run_training(
@@ -211,6 +258,17 @@ def run_training(
     print(f"  mixed precision: {mixed_precision}")
     print(f"  suites: freeze_vision_encoder={config.FREEZE_VISION_ENCODER}")
 
+    preserve_normalizer = (
+        getattr(config, "PHASE4_PRESERVE_BASE_NORMALIZER", False)
+        and config.DATASET_ROOT is not None
+        and (base_model_local / "policy_preprocessor.json").is_file()
+    )
+    if preserve_normalizer:
+        backup = inject_model_stats_into_dataset(
+            config.DATASET_ROOT, base_model_local
+        )
+        print(f"  normalizer: injected base stats into dataset (backup={backup.name})")
+
     process = subprocess.Popen(
         command,
         cwd=config.LEROBOT_DIR,
@@ -225,24 +283,29 @@ def run_training(
     report_step = config.LOG_FREQ
     assert process.stdout is not None
 
-    for raw_line in process.stdout:
-        line = raw_line.replace("\r", "").strip()
-        if not line:
-            continue
-        recent_lines.append(line)
-        if "step:" in line and "loss:" in line:
-            loss_match = re.search(r"loss:([0-9.eE+-]+)", line)
-            lr_match = re.search(r"lr:([0-9.eE+-]+)", line)
-            loss = loss_match.group(1) if loss_match else "n/a"
-            lr = lr_match.group(1) if lr_match else "n/a"
-            print(f"step {report_step:4d}/{config.STEPS}  loss={loss}  lr={lr}")
-            report_step += config.LOG_FREQ
+    try:
+        for raw_line in process.stdout:
+            line = raw_line.replace("\r", "").strip()
+            if not line:
+                continue
+            recent_lines.append(line)
+            if "step:" in line and "loss:" in line:
+                loss_match = re.search(r"loss:([0-9.eE+-]+)", line)
+                lr_match = re.search(r"lr:([0-9.eE+-]+)", line)
+                loss = loss_match.group(1) if loss_match else "n/a"
+                lr = lr_match.group(1) if lr_match else "n/a"
+                print(f"step {report_step:4d}/{config.STEPS}  loss={loss}  lr={lr}")
+                report_step += config.LOG_FREQ
 
-    return_code = process.wait()
-    if return_code != 0:
-        print("\n".join(recent_lines))
-        raise RuntimeError(f"Training failed: {return_code}")
-    print("Training complete.")
+        return_code = process.wait()
+        if return_code != 0:
+            print("\n".join(recent_lines))
+            raise RuntimeError(f"Training failed: {return_code}")
+        print("Training complete.")
+    finally:
+        if preserve_normalizer:
+            restore_dataset_stats_backup(config.DATASET_ROOT)
+            print("  normalizer: restored dataset stats backup")
 
 
 def main() -> None:
@@ -283,15 +346,27 @@ def main() -> None:
         action="store_true",
         help="hold-out object/goal 弱点 LoRA（stage2 merged をベース）",
     )
+    parser.add_argument(
+        "--phase4",
+        action="store_true",
+        help="LIBERO-90 多様タスク + replay LoRA（ローカル集約データセット）",
+    )
     args = parser.parse_args()
 
     stage_flags = sum(
         int(x)
-        for x in (args.stage1, args.track1_stage2, args.phase3, args.spatial_only)
+        for x in (
+            args.stage1,
+            args.track1_stage2,
+            args.phase3,
+            args.phase4,
+            args.spatial_only,
+        )
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --phase3 / --spatial-only は同時に指定できません"
+            "--stage1 / --track1-stage2 / --phase3 / --phase4 / --spatial-only "
+            "は同時に指定できません"
         )
     if args.stage1 and args.track1_stage2:
         parser.error("--stage1 と --track1-stage2 は同時に指定できません")
@@ -328,7 +403,28 @@ def main() -> None:
 
     sys.path.insert(0, str(lerobot_src))
 
-    if args.phase3:
+    if args.phase4:
+        config.apply_phase4_config()
+        episode_indices = load_phase4_episode_indices()
+        selected_by_task = {
+            "phase4_mixture": episode_indices,
+        }
+        job_name = "smolvla_libero_diverse_phase4_lora"
+        print(
+            f"Training phase4: episodes={len(episode_indices)} "
+            f"root={config.DATASET_ROOT}"
+        )
+        print_episode_selection_summary(
+            selected_by_task,
+            [
+                config.TrainSuiteSpec(
+                    "phase4_mixture",
+                    ["phase4_mixture"],
+                    len(episode_indices),
+                )
+            ],
+        )
+    elif args.phase3:
         config.apply_phase3_config()
         suites = list(config.PHASE3_TRAIN_SUITES)
         task_episode_overrides = config.PHASE3_TASK_EPISODE_OVERRIDES
@@ -350,29 +446,38 @@ def main() -> None:
         else:
             job_name = "smolvla_libero_plus_multisuite_lora"
 
-    episode_indices, selected_by_task = select_training_episodes(
-        config.DATASET_REPO,
-        config.DATASET_REVISION,
-        suites,
-        task_episode_overrides=task_episode_overrides,
-    )
-    print(f"Training suites: {[suite.name for suite in suites]}")
-    print_episode_selection_summary(selected_by_task, suites)
+    if not args.phase4:
+        episode_indices, selected_by_task = select_training_episodes(
+            config.DATASET_REPO,
+            config.DATASET_REVISION,
+            suites,
+            task_episode_overrides=task_episode_overrides,
+        )
+        print(f"Training suites: {[suite.name for suite in suites]}")
+        print_episode_selection_summary(selected_by_task, suites)
 
     base_model_local = resolve_base_model()
-    print(f"Prefetching dataset ({len(episode_indices)} episodes)...")
-    prefetch_dataset(
-        config.DATASET_REPO,
-        config.DATASET_REVISION,
-        episode_indices,
-        lerobot_src,
-    )
+    if config.DATASET_ROOT is None:
+        print(f"Prefetching dataset ({len(episode_indices)} episodes)...")
+        prefetch_dataset(
+            config.DATASET_REPO,
+            config.DATASET_REVISION,
+            episode_indices,
+            lerobot_src,
+        )
+    else:
+        print(
+            f"Using local dataset ({len(episode_indices)} episodes): "
+            f"{config.DATASET_ROOT}"
+        )
     run_training(base_model_local, episode_indices, lerobot_src, job_name=job_name)
 
     if not args.skip_merge:
         merge_script = SCRIPT_DIR / "merge_lora.py"
         merge_cmd = [sys.executable, str(merge_script)]
-        if args.phase3:
+        if args.phase4:
+            merge_cmd.append("--phase4")
+        elif args.phase3:
             merge_cmd.append("--phase3")
         elif args.track1_stage2:
             merge_cmd.append("--track1-stage2")

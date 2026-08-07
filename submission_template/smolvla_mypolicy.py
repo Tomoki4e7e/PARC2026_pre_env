@@ -11,6 +11,7 @@ submission_template/policy_server.py の MyPolicy クラスを、この内容で
 
 from __future__ import annotations
 
+import json
 import math
 import os
 import re
@@ -59,11 +60,36 @@ def _flip_libero_image(img: np.ndarray) -> np.ndarray:
     return arr
 
 
-def _prepare_image(img: np.ndarray) -> np.ndarray:
-    """PARC の HWC uint8 画像を LeRobot 前処理向け CHW float32 [0, 1] へ変換。"""
+def _visual_layout_from_preprocessor(pretrained_path: str | Path) -> str:
+    """policy_preprocessor.json の visual shape から CHW / HWC を判定する。"""
+    path = Path(pretrained_path) / "policy_preprocessor.json"
+    if not path.is_file():
+        return "chw"
+    pre = json.loads(path.read_text())
+    for step in pre.get("steps", []):
+        if step.get("registry_name") != "normalizer_processor":
+            continue
+        shape = step["config"]["features"]["observation.images.front"]["shape"]
+        if len(shape) == 3:
+            if shape[0] == 3:
+                return "chw"
+            if shape[-1] in (1, 3, 4):
+                return "hwc"
+    return "chw"
+
+
+def _prepare_image(img: np.ndarray, *, layout: str = "chw") -> np.ndarray:
+    """PARC の HWC uint8 画像をモデル preprocessor が期待する layout へ変換。"""
     arr = _flip_libero_image(img)
-    if arr.ndim == 3 and arr.shape[-1] in (1, 3, 4) and arr.shape[-1] < arr.shape[0]:
+    is_hwc = (
+        arr.ndim == 3
+        and arr.shape[-1] in (1, 3, 4)
+        and arr.shape[-1] < arr.shape[0]
+    )
+    if layout == "chw" and is_hwc:
         arr = arr.transpose(2, 0, 1)
+    elif layout == "hwc" and not is_hwc and arr.ndim == 3 and arr.shape[0] in (1, 3, 4):
+        arr = arr.transpose(1, 2, 0)
     if arr.dtype == np.uint8:
         return arr.astype(np.float32) / 255.0
     return arr.astype(np.float32)
@@ -367,7 +393,12 @@ def _scale_action_motion(action: np.ndarray, scale: float) -> np.ndarray:
     return scaled
 
 
-def _build_lerobot_observation(obs: dict[str, np.ndarray], instruction: str) -> dict:
+def _build_lerobot_observation(
+    obs: dict[str, np.ndarray],
+    instruction: str,
+    *,
+    visual_layout: str = "chw",
+) -> dict:
     """PARC 評価パイプラインの観測を LeRobot / SmolVLA 形式へ変換。"""
     state = np.concatenate(
         [
@@ -377,8 +408,12 @@ def _build_lerobot_observation(obs: dict[str, np.ndarray], instruction: str) -> 
         ]
     )
     return {
-        "observation.images.front": _prepare_image(obs["agentview_image"]),
-        "observation.images.wrist": _prepare_image(obs["robot0_eye_in_hand_image"]),
+        "observation.images.front": _prepare_image(
+            obs["agentview_image"], layout=visual_layout
+        ),
+        "observation.images.wrist": _prepare_image(
+            obs["robot0_eye_in_hand_image"], layout=visual_layout
+        ),
         "observation.state": state,
         "task": instruction,
     }
@@ -488,8 +523,10 @@ class SmolVLAMyPolicy(BasePolicy):
                 "submission_template/model_weights/smolvla_spatial_lora/ へコピーしてください。"
             )
 
+        self._visual_layout = _visual_layout_from_preprocessor(model_path)
         print(
             f"[smolvla] instruction_mode={INSTRUCTION_MODE} "
+            f"visual_layout={self._visual_layout} "
             f"aliases={len(INSTRUCTION_ALIASES)} canonical={len(CANONICAL_TASKS)} "
             f"paraphrase_classes={len(_PARAPHRASE_CENTROIDS)}",
             flush=True,
@@ -528,7 +565,11 @@ class SmolVLAMyPolicy(BasePolicy):
         # 新 chunk 生成直前かどうか（queue 空 = 次の select_action で推論が走る）
         new_chunk = len(self.policy._queues[ACTION]) == 0
 
-        frame = _to_preprocessor_frame(_build_lerobot_observation(obs, self.instruction))
+        frame = _to_preprocessor_frame(
+            _build_lerobot_observation(
+                obs, self.instruction, visual_layout=self._visual_layout
+            )
+        )
         with torch.inference_mode():
             batch = self.preprocess(frame)
             action = self.policy.select_action(batch)

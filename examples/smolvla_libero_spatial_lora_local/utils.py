@@ -345,3 +345,127 @@ def build_lerobot_observation(obs: dict, instruction: str) -> dict:
         "observation.state": state,
         "task": instruction,
     }
+
+
+def load_normalizer_stats_from_model(model_dir: Path) -> dict[str, dict[str, list]]:
+    """policy_preprocessor の normalizer safetensors から dataset stats 互換 dict を作る。"""
+    from safetensors import safe_open
+
+    candidates = sorted(model_dir.glob("policy_preprocessor*_normalizer_processor.safetensors"))
+    if not candidates:
+        raise FileNotFoundError(f"normalizer safetensors がありません: {model_dir}")
+    stats: dict[str, dict[str, list]] = {}
+    with safe_open(candidates[0], framework="pt", device="cpu") as handle:
+        for key in handle.keys():
+            feature, field = key.rsplit(".", 1)
+            tensor = handle.get_tensor(key)
+            stats.setdefault(feature, {})[field] = tensor.detach().cpu().tolist()
+    return stats
+
+
+def inject_model_stats_into_dataset(
+    dataset_root: Path,
+    model_dir: Path,
+    *,
+    features: tuple[str, ...] = ("action", "observation.state"),
+) -> Path:
+    """学習が使う dataset meta/stats.json の指定 feature を model normalizer に合わせる。
+
+    戻り値はバックアップ先パス（呼び出し側で restore 可能）。
+    """
+    import json
+    import shutil
+
+    stats_path = dataset_root / "meta" / "stats.json"
+    if not stats_path.is_file():
+        raise FileNotFoundError(f"dataset stats がありません: {stats_path}")
+    backup_path = dataset_root / "meta" / "stats.json.phase4_backup"
+    if not backup_path.is_file():
+        shutil.copy2(stats_path, backup_path)
+
+    model_stats = load_normalizer_stats_from_model(model_dir)
+    dataset_stats = json.loads(stats_path.read_text(encoding="utf-8"))
+    for feature in features:
+        if feature not in model_stats:
+            raise KeyError(f"model normalizer に {feature} がありません")
+        dataset_stats[feature] = model_stats[feature]
+    stats_path.write_text(
+        json.dumps(dataset_stats, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return backup_path
+
+
+def restore_dataset_stats_backup(dataset_root: Path) -> bool:
+    """inject_model_stats_into_dataset のバックアップを戻す。"""
+    import shutil
+
+    stats_path = dataset_root / "meta" / "stats.json"
+    backup_path = dataset_root / "meta" / "stats.json.phase4_backup"
+    if not backup_path.is_file():
+        return False
+    shutil.copy2(backup_path, stats_path)
+    return True
+
+
+def select_phase4_mixture_episodes(
+    manifest: dict,
+    *,
+    target_replay_fraction: float,
+) -> tuple[list[int], dict[str, int]]:
+    """manifest から replay 比率を上げた episode リストを作る。
+
+    replay は全件保持し、diverse を均等間引きして目標比率に近づける。
+    """
+    if not 0.05 < target_replay_fraction < 0.95:
+        raise ValueError(f"target_replay_fraction が不正: {target_replay_fraction}")
+
+    diverse: list[int] = []
+    replay: list[int] = []
+    for source in manifest["sources"]:
+        indices = [int(x) for x in source["selected_aggregated_episode_indices"]]
+        if source["role"] == "diverse_train":
+            diverse.extend(indices)
+        else:
+            replay.extend(indices)
+
+    if not replay:
+        raise RuntimeError("manifest に replay episode がありません。")
+    if not diverse:
+        raise RuntimeError("manifest に diverse episode がありません。")
+
+    # R = Nr / (Nr + Nd)  =>  Nd = Nr * (1-R) / R
+    target_diverse = int(
+        round(len(replay) * (1.0 - target_replay_fraction) / target_replay_fraction)
+    )
+    target_diverse = max(1, min(len(diverse), target_diverse))
+    kept_diverse = choose_evenly_spaced(sorted(diverse), target_diverse)
+    selected = sorted(set(kept_diverse) | set(replay))
+    summary = {
+        "diverse_available": len(diverse),
+        "diverse_kept": len(kept_diverse),
+        "replay_kept": len(replay),
+        "total": len(selected),
+        "replay_fraction": len(replay) / len(selected),
+        "target_replay_fraction": target_replay_fraction,
+    }
+    return selected, summary
+
+
+def copy_processors_from_model(src_model_dir: Path, dest_model_dir: Path) -> None:
+    """src の pre/post processor 一式を dest へ上書きコピーする。"""
+    import shutil
+
+    patterns = [
+        "policy_preprocessor.json",
+        "policy_preprocessor*.safetensors",
+        "policy_postprocessor.json",
+        "policy_postprocessor*.safetensors",
+    ]
+    copied = 0
+    for pattern in patterns:
+        for source_path in src_model_dir.glob(pattern):
+            shutil.copy2(source_path, dest_model_dir / source_path.name)
+            copied += 1
+    if copied == 0:
+        raise FileNotFoundError(f"processor ファイルがありません: {src_model_dir}")

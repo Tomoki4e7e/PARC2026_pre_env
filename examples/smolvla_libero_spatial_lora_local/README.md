@@ -331,6 +331,43 @@ python -m pipeline --server-url http://localhost:8000 --track track1 --n-episode
 python validate_submission.py submission_template/ --install
 ```
 
+## LIBERO-90 多様タスク再学習データ
+
+固定 OOD 12タスクを除外した40タスク（新規物体・受け皿・関節・複合操作を
+各10タスク）と、既知40タスクの replay を準備する。
+
+```bash
+source examples/smolvla_libero_spatial_lora_local/env_smolvla.sh
+conda activate ~/.local/smolvla-conda-env
+
+# metadata のみ取得して分割・schema・episode 数を検証
+python examples/smolvla_libero_spatial_lora_local/prepare_diverse_retrain_data.py
+
+# 全データを取得し、学習用ローカルデータセットへ集約
+python examples/smolvla_libero_spatial_lora_local/prepare_diverse_retrain_data.py --prepare
+```
+
+データ源は `nvidia/LIBERO_LeRobot_v3` の固定 revision
+`e5907374380b8f96511957e6ba5582be52a1e179`（OpenMDW-1.1）。
+選択結果は `work/diverse_retrain_manifest.json` に保存される。
+構成は多様タスク 800 ep + replay 280 ep（replay 25.9%）。OOD task は manifest
+上で明示され、学習 episode との非重複を実行時に検証する。
+
+`--prepare` の出力は `work/datasets/libero_diverse_retrain`（5,614 ep / 約4.2GB）。
+suite ごとに `names` 表記や scalar の `fps` が異なるため、集約前に feature
+metadata を正規化する（dtype と shape は変更しない）。集約後はカメラキーを
+`front` / `wrist` に整列し、SmolVLA preprocessor と一致させる。
+
+### Phase 4 学習 + OOD early stopping
+
+```bash
+# 学習（20k steps, 2.5k ごとに checkpoint）
+bash examples/smolvla_libero_spatial_lora_local/run_phase4_train.sh --skip-merge
+
+# checkpoint ごとに OOD-90 固定12タスクで評価し最良を採用
+python examples/smolvla_libero_spatial_lora_local/run_phase4_ood_early_stop.py
+```
+
 ## 注意事項
 
 | 項目 | ノートブック / 本スクリプト | PARC 本番採点 |
