@@ -174,6 +174,35 @@ PHASE4_MERGED_MODEL_DIR = WORK_DIR / "smolvla_libero_diverse_phase4_v2_merged"
 # stage2 merged をベースにしないと Track1 / hold-out 能力が HF 素モデルへ巻き戻る。
 PHASE4_BASE_MODEL_DIR: Path | None = WORK_DIR / "smolvla_libero_plus_track1_stage2_merged"
 
+# ── 第5段階: 品質フィルタ済みデモでの追加 LoRA（滑らかさ重視） ──────────────
+# Track1 + Phase3 弱点タスクのプールから jerk/SPARC/回転総量が良い demo を優先選定。
+# ベースは Phase4 v2 merged（無ければ stage2）。checkpoint は複合 proxy で選定。
+PHASE5_QUALITY_CACHE = WORK_DIR / "episode_quality_phase5.json"
+PHASE5_MIN_QUALITY: float | None = None  # None なら上位 count のみ（閾値なし）
+PHASE5_OVERSAMPLE_TOP_FRAC = 0.0  # lerobot episodes は集合扱いのため通常は 0
+PHASE5_STEPS = 6_000
+PHASE5_SAVE_FREQ = 1_000
+PHASE5_LEARNING_RATE = 5e-5
+PHASE5_FINAL_LEARNING_RATE = 5e-6
+PHASE5_LORA_R = 16
+PHASE5_LORA_ALPHA = 16
+PHASE5_FREEZE_VISION_ENCODER = True
+PHASE5_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_libero_plus_phase5_quality_lora"
+PHASE5_MERGED_MODEL_DIR = WORK_DIR / "smolvla_libero_plus_phase5_quality_merged"
+PHASE5_BASE_MODEL_DIR: Path | None = WORK_DIR / "smolvla_libero_diverse_phase4_v2_merged"
+# Phase5 の ep 数（品質上位）。弱点タスクは多め。
+PHASE5_TASK_EPISODE_OVERRIDES: dict[str, int] = {
+    "pick up the tomato sauce and place it in the basket": 50,
+    "pick up the milk and place it in the basket": 40,
+    "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate": 50,
+    "put the bowl on the stove": 30,
+    "pick up the alphabet soup and place it in the basket": 40,
+    "pick up the butter and place it in the basket": 35,
+    "pick up the ketchup and place it in the basket": 35,
+    "open the middle drawer of the cabinet": 40,
+    "turn on the stove": 40,
+}
+
 # ── train.py / merge_lora.py が参照するアクティブ設定（第1段階が既定） ───────
 STEPS = STAGE1_STEPS
 LOG_FREQ = 100
@@ -191,6 +220,11 @@ TRAIN_EXPERT_ONLY = not FREEZE_VISION_ENCODER
 
 OUTPUT_DIR = STAGE1_OUTPUT_DIR
 MERGED_MODEL_DIR = STAGE1_MERGED_MODEL_DIR
+
+# 品質フィルタ（None なら従来の均等間隔選定）
+QUALITY_CACHE_PATH: Path | None = None
+QUALITY_MIN_QUALITY: float | None = None
+QUALITY_OVERSAMPLE_TOP_FRAC = 0.0
 
 # ローカル merged モデルをベースにする場合（第2段階 LoRA）。None なら HF から取得。
 BASE_MODEL_LOCAL: Path | None = None
@@ -247,6 +281,30 @@ PHASE3_TRAIN_SUITES: tuple[TrainSuiteSpec, ...] = (
     ),
 )
 
+PHASE5_TRAIN_SUITES: tuple[TrainSuiteSpec, ...] = (
+    TrainSuiteSpec(
+        "spatial",
+        TRACK1_STAGE2_SPATIAL_TASK_NAMES,
+        TRAIN_EPISODES_PER_TASK,
+    ),
+    TrainSuiteSpec(
+        "object",
+        list(
+            dict.fromkeys(
+                TRACK1_STAGE2_OBJECT_TASK_NAMES + PHASE3_OBJECT_TASK_NAMES
+            )
+        ),
+        OBJECT_EPISODES_PER_TASK,
+    ),
+    TrainSuiteSpec(
+        "goal",
+        list(
+            dict.fromkeys(TRACK1_STAGE2_GOAL_TASK_NAMES + PHASE3_GOAL_TASK_NAMES)
+        ),
+        GOAL_EPISODES_PER_TASK,
+    ),
+)
+
 
 def apply_stage1_config() -> None:
     """第1段階 multi-suite LoRA 用に train/merge が参照する設定を復元する。"""
@@ -254,6 +312,7 @@ def apply_stage1_config() -> None:
     global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
     global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
     global DATASET_REPO, DATASET_REVISION
+    global QUALITY_CACHE_PATH, QUALITY_MIN_QUALITY, QUALITY_OVERSAMPLE_TOP_FRAC
 
     STEPS = STAGE1_STEPS
     LEARNING_RATE = STAGE1_LEARNING_RATE
@@ -269,6 +328,9 @@ def apply_stage1_config() -> None:
     SAVE_FREQ = None
     DATASET_REPO = LIBERO_PLUS_DATASET_REPO
     DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
+    QUALITY_CACHE_PATH = None
+    QUALITY_MIN_QUALITY = None
+    QUALITY_OVERSAMPLE_TOP_FRAC = 0.0
 
 
 def apply_track1_stage2_config() -> None:
@@ -277,6 +339,7 @@ def apply_track1_stage2_config() -> None:
     global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
     global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
     global DATASET_REPO, DATASET_REVISION
+    global QUALITY_CACHE_PATH, QUALITY_MIN_QUALITY, QUALITY_OVERSAMPLE_TOP_FRAC
 
     STEPS = STAGE2_STEPS
     LEARNING_RATE = STAGE2_LEARNING_RATE
@@ -292,6 +355,9 @@ def apply_track1_stage2_config() -> None:
     SAVE_FREQ = None
     DATASET_REPO = LIBERO_PLUS_DATASET_REPO
     DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
+    QUALITY_CACHE_PATH = None
+    QUALITY_MIN_QUALITY = None
+    QUALITY_OVERSAMPLE_TOP_FRAC = 0.0
 
 
 def apply_phase3_config() -> None:
@@ -300,6 +366,7 @@ def apply_phase3_config() -> None:
     global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
     global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
     global DATASET_REPO, DATASET_REVISION
+    global QUALITY_CACHE_PATH, QUALITY_MIN_QUALITY, QUALITY_OVERSAMPLE_TOP_FRAC
 
     STEPS = PHASE3_STEPS
     LEARNING_RATE = PHASE3_LEARNING_RATE
@@ -315,6 +382,9 @@ def apply_phase3_config() -> None:
     SAVE_FREQ = None
     DATASET_REPO = LIBERO_PLUS_DATASET_REPO
     DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
+    QUALITY_CACHE_PATH = None
+    QUALITY_MIN_QUALITY = None
+    QUALITY_OVERSAMPLE_TOP_FRAC = 0.0
 
 
 def apply_phase4_config() -> None:
@@ -323,6 +393,7 @@ def apply_phase4_config() -> None:
     global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
     global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
     global DATASET_REPO, DATASET_REVISION
+    global QUALITY_CACHE_PATH, QUALITY_MIN_QUALITY, QUALITY_OVERSAMPLE_TOP_FRAC
 
     STEPS = PHASE4_STEPS
     LEARNING_RATE = PHASE4_LEARNING_RATE
@@ -338,3 +409,36 @@ def apply_phase4_config() -> None:
     SAVE_FREQ = PHASE4_SAVE_FREQ
     DATASET_REPO = PHASE4_DATASET_REPO
     DATASET_REVISION = None
+    QUALITY_CACHE_PATH = None
+    QUALITY_MIN_QUALITY = None
+    QUALITY_OVERSAMPLE_TOP_FRAC = 0.0
+
+
+def apply_phase5_config() -> None:
+    """第5段階: 品質フィルタ済みデモでの追加 LoRA。"""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION
+    global QUALITY_CACHE_PATH, QUALITY_MIN_QUALITY, QUALITY_OVERSAMPLE_TOP_FRAC
+
+    STEPS = PHASE5_STEPS
+    LEARNING_RATE = PHASE5_LEARNING_RATE
+    FINAL_LEARNING_RATE = PHASE5_FINAL_LEARNING_RATE
+    LORA_R = PHASE5_LORA_R
+    LORA_ALPHA = PHASE5_LORA_ALPHA
+    FREEZE_VISION_ENCODER = PHASE5_FREEZE_VISION_ENCODER
+    TRAIN_EXPERT_ONLY = not PHASE5_FREEZE_VISION_ENCODER
+    OUTPUT_DIR = PHASE5_OUTPUT_DIR
+    MERGED_MODEL_DIR = PHASE5_MERGED_MODEL_DIR
+    base = PHASE5_BASE_MODEL_DIR
+    if base is None or not (base / "model.safetensors").is_file():
+        base = STAGE2_MERGED_MODEL_DIR
+    BASE_MODEL_LOCAL = base
+    DATASET_ROOT = None
+    SAVE_FREQ = PHASE5_SAVE_FREQ
+    DATASET_REPO = LIBERO_PLUS_DATASET_REPO
+    DATASET_REVISION = LIBERO_PLUS_DATASET_REVISION
+    QUALITY_CACHE_PATH = PHASE5_QUALITY_CACHE
+    QUALITY_MIN_QUALITY = PHASE5_MIN_QUALITY
+    QUALITY_OVERSAMPLE_TOP_FRAC = PHASE5_OVERSAMPLE_TOP_FRAC

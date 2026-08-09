@@ -15,45 +15,147 @@
 
 ---
 
-## ① instruction正規化のデフォルトを`alias`から底上げする（低コスト・高リターン）
+## ⓪ 失敗記録: Phase5 提出が本番スコア 0.000（2026-08-09）
 
-`submission_template/smolvla_mypolicy.py:256` は
+**症状**: ポリシーサーバーは正常起動、`/act` は全て 200、合計 140.1 秒で完走した上で
+`track1: 総合スコア 0.000`。パッケージ側は無罪だった（`config.json` の実質差分は
+学習ハイパラのみ、正規化統計は stage2 と md5 一致、validate は PASS）。
 
-```python
-INSTRUCTION_MODE = os.environ.get("PARC_INSTRUCTION_MODE", "alias").strip().lower()
-```
+**原因**: 選定に使った hold-out 9 タスクのうち **5 タスクが Phase5 の学習データそのもの**
+だった（`pick up the alphabet soup` / `ketchup` / `butter` / `open the middle drawer` /
+`turn on the stove`）。汚染タスクでのみスコアが伸び、合成 proxy は phase5 0.524 >
+stage2 0.482 となったため、汎化を失ったモデルを最良と誤選定した。
 
-であり、`Dockerfile`・`requirements.txt`・`bundle_submission.sh`のどこにも `PARC_INSTRUCTION_MODE` を設定する箇所がないことを確認した。つまり**本番の採点サーバーは常に`alias`モード（完全一致辞書のみ、未知の文言はそのまま通す）で動く**。
+| hold-out suite | 学習との重複 | stage2 | phase5 |
+|---|---|---|---|
+| spatial | なし（clean） | 0.400 | **0.333** |
+| object | 3/3 学習済み | 0.067 | 0.267 |
+| goal | 2/3 学習済み | 0.200 | 0.333 |
 
-非公開タスクの instruction 文言が `instruction_aliases.py`（4スイートの既知タスクから生成）に載っている保証はなく、載っていなければモデルは学習時と異なる言い回しをそのまま与えられる。`eval_paraphrase_ood.py`で既にOOD誤マッチ率≤2%になるよう閾値（`PARAPHRASE_MODEL_MIN_SCORE=0.10`）を調整済みなので、これを活かして
+clean な suite だけが悪化しており、典型的な暗記の兆候だった。本番は非公開タスクなので
+成功が 0 に落ち、Total Score は成功・衝突をゲートにした積のため全体が 0.000 になった。
 
-- 最低限 `generic`（alias＋規則書き換え＋variantサフィックス除去）へ格上げ
-- proxy評価で`match`モードの方が実際にスコアが高いか比較した上で採用
+**副因**: 品質フィルタで選んだ 360 ep は品質スコアがほぼ同一帯（min 0.659 / mean 0.670）に
+集中し、軌道の多様性が落ちていた。滑らかさで絞ると挙動のバリエーションが削られる。
 
-を検討する価値が高い。**コード変更ゼロ、env var 1個で試せる**ため最初に潰すべき仮説。
+**対策（実装済み）**: `proxy_holdout.py` を追加し、hold-out を「その段階の学習タスクと排他」
+に自動構成する（`--holdout-mode auto_clean` が既定、汚染時は停止）。加えて
+`clean_holdout_not_worse` と `ood_not_worse`（OOD-90）をゲート化し、1 つでも落ちたら
+stage2 を維持する。`stage1` / `phase4` は 3 suite の全ベースタスクを学習済みで
+suite 内 hold-out が成立しないことも判明したため、OOD-90 が唯一の汎化シグナルである。
 
 ---
 
-## ② Phase4チェックポイント選定を一本化して「本当に一番良いもの」を出荷する
+## ① instruction正規化のデフォルトを`alias`から`generic`へ（実施済み・2026-08-09）
 
-`run_phase4_proxy_select.py`（→`phase4_v2`としてデプロイ）と`run_phase4_ood_early_stop.py`（→`phase4`としてデプロイ）が別々の指標・別々のvariant名で走り、`deploy_model.sh`のフォールバック順（`phase4_v2 → phase4_from_stage2 → phase4`）次第で片方が黙って上書きされる。実際に出荷されている重みが「意図した最良チェックポイント」である保証がない状態なので、
+`submission_template/smolvla_mypolicy.py` の既定を **`generic`** に変更した。
 
-1. 両選定の候補チェックポイントを列挙
-2. 「example4 + 9task hold-out」と「真OOD 12task」の両方で横並び評価
-3. 最も両立している1つを明示的に選んでデプロイ
+### A/B 検証（stage2・同一 seed）
 
-という手順に統合するだけで、既存の学習をやり直さずにスコアが上振れする可能性がある。
+| mode | inset (example4) | holdout spatial | language proxy |
+|---|---|---|---|
+| alias（旧既定） | 0.625 | **0.400** | 0.722 |
+| **generic（新既定）** | 0.625 | **0.867** | 0.722 |
+| match | 0.625 | 0.867 | 0.722 |
+
+- **generic の本命効果**: instruction 末尾の摂動サフィックス（`table N` / `light N`）を除去し、学習時の task 文字列に揃える。hold-out で +0.467。
+- **match は不採用**: 上記セットでは generic と同点だが、未知 instruction を既知 40 タスクへ強制写像する（OOD false-accept が高い）。
+- **本番 Track1**: CSV 由来の instruction には摂動サフィックスが無い想定のため、本番での上振れ幅は hold-out ほど大きくない可能性がある。それでも alias との差分は「等価 or 改善」で悪化は観測されなかった。
+
+結果の生データ: `results/instruction_mode_ab_stage2/summary.json`
 
 ---
 
-## ③ アクションチャンク境界のジャーク低減を全タスクに一般化する
+## ② Phase4チェックポイント選定を一本化（実施済み・2026-08-09）
 
-`CHUNK_FIRST_STEP_ACTION_SCALE`（`smolvla_mypolicy.py:263-271`）は**特定のinstruction文字列にしか効かない**手作業のスケーリング表。非公開タスクはこの辞書にヒットしないため恩恵を受けない。成功判定は「ゴール達成 かつ 対象外物体の変位が1mm以内」なので、チャンク切替直後のスナップ的な動きは**タスク非依存で衝突リスクを底上げしている**はずである。対策として
+`run_phase4_proxy_select.py`（→`phase4_v2`）と`run_phase4_ood_early_stop.py`（→旧`phase4`）の
+二重系統を廃止し、**`run_phase4_unified_select.py` を唯一の出荷決定点**にした。
 
-- 全タスク共通で新チャンク先頭N stepに減衰スケール（例: 0.6→0.8→1.0のランプ）をかける
-- あるいはACT系の時間アンサンブル（重複するチャンク予測を指数加重平均）に置き換える
+### 変更点
 
-のどちらかにすれば、instruction辞書のカバレッジに依存せず衝突起因の失敗を減らせる。`total_score.py`のjerk/SPARC計算は既に存在するので、これを使ってオフラインで効果を定量化できる。
+| 項目 | 旧 | 新 |
+|---|---|---|
+| 出荷決定 | proxy / OOD が別々 + deploy silent fallback | `run_phase4_unified_select.py` のみ |
+| `deploy_model.sh phase4` | v2→from_stage2→legacy を黙ってフォールバック | **統一選定 JSON 必須**（未実行はエラー） |
+| 明示 variant | `phase4_v2` / `phase4_legacy` | + `phase4_from_stage2` / `phase4_selected` |
+| ゲート | バラバラ | inset / clean-holdout(可なら) / OOD-90 を stage2 比較 |
+
+Phase4 は libero_plus 3 suite をほぼ全学習しているため **suite 内 clean hold-out は N/A**。
+その場合は inset + OOD-90 で stage2 と比較する。
+
+結果: `results/phase4_unified_select/selection.json`
+
+### 横並び結果（現行推論: generic + chunk off）
+
+| candidate | inset | clean holdout | OOD-90 | proxy | ゲート |
+|---|---|---|---|---|---|
+| **stage2（採用）** | **0.725** | **0.778** | 0.000 | **0.913** | baseline |
+| phase4_v2 | 0.000 | N/A | 0.000 | -0.034 | inset / proxy 落ち |
+| phase4_from_stage2 | 0.000 | N/A | 0.000 | 0.090 | inset / proxy 落ち |
+| phase4_legacy | 0.000 | N/A | 0.000 | 0.073 | inset / proxy 落ち |
+
+**出荷決定: stage2 を維持。** `deploy_model.sh phase4` も選定 JSON 経由で stage2 を出す。
+
+---
+
+## ③ アクションチャンク境界のジャーク低減（実装・評価済み・2026-08-09）
+
+全タスク共通ランプを実装し、stage2 + `generic` で A/B した。
+
+### 攻撃的ランプ（初回）
+
+| mode | inset | holdout avg | hold coll | proxy |
+|---|---|---|---|---|
+| **off（採用）** | **0.725** | **0.778** | 0.089 | **0.913** |
+| legacy（旧・タスク辞書） | 0.625 | 0.778 | 0.089 | 0.870 |
+| ramp `0.6→0.8→1.0` | 0.675 | 0.756 | 0.111 | 0.874 |
+
+### milder 再試行
+
+| mode | inset | holdout avg | hold coll | proxy | ゲート |
+|---|---|---|---|---|---|
+| **off** | **0.725** | 0.778 | 0.089 | **0.913** | baseline |
+| ramp `0.85→0.95→1.0` | 0.650 | 0.778 | 0.089 | 0.884 | 落ち（inset/proxy） |
+| ramp `0.9→1.0` | 0.675 | 0.778 | 0.089 | 0.895 | 落ち（inset/proxy） |
+
+- hold-out 成功率は milder でも `off` と同点だが、**inset が一律に下がる**（衝突はわずかに減る程度）。
+- **結論不変: 既定は `CHUNK_SCALE_MODE=off`**。ランプ実装は残置（`PARC_CHUNK_SCALE_MODE=ramp` + `PARC_CHUNK_SCALE_RAMP` で再試行可）。
+
+生データ: `results/chunk_scale_ab_stage2/summary.json`, `results/chunk_scale_ab_mild/summary.json`
+
+---
+
+## ④ Temporal ensemble（ACT 式・推論のみ）（実施済み・2026-08-09）
+
+ACT [arXiv:2304.13705](https://huggingface.co/papers/2304.13705) Algorithm 2 の
+指数重み付き temporal ensembling を `smolvla_mypolicy.py` に実装した。
+**追加学習は不要**（同一 stage2 重みの推論切替のみ）。
+
+### 実装
+
+| 環境変数 | 採用値 | 意味 |
+|---|---|---|
+| `PARC_TEMPORAL_ENSEMBLE` | `1`（既定） | 有効化 |
+| `PARC_TE_STRIDE` | `5` | 何 step ごとに再推論するか |
+| `PARC_TE_COEFF` | `0.01` | ACT 既定。古い予測をやや重視 |
+| `PARC_TE_CHUNK` | （未設定=50） | ensemble に使う chunk 長 |
+
+無効化: `PARC_TEMPORAL_ENSEMBLE=0`。A/B スクリプト:
+`examples/smolvla_libero_spatial_lora_local/run_temporal_ensemble_ab.py`
+
+### A/B（stage2 + generic + chunk off・同一 seed）
+
+| variant | inset | holdout avg | hold coll | hold jerk | proxy | ゲート |
+|---|---|---|---|---|---|---|
+| off（旧既定） | 0.725 | 0.778 | 0.089 | 3.932 | 0.913 | baseline |
+| **te_s5_c0.01（採用）** | **0.850** | **0.933** | **0.022** | **2.603** | **1.102** | 全通過 |
+| te_s10_c0.01 | 0.750 | 0.933 | 0.022 | 2.890 | 1.055 | 全通過 |
+
+- 成功率・衝突・滑らかさ（jerk）が同時に改善。proxy +0.19。
+- 評価時間は inset 117s → 245s（再推論増）。1 リクエスト推論 ~150ms で 10s 制限内。
+- **出荷既定を `te_s5_c0.01` に変更**（stage2 重みは変更なし）。
+
+生データ: `results/temporal_ensemble_ab_stage2/summary.json`
 
 ---
 
@@ -61,6 +163,7 @@ INSTRUCTION_MODE = os.environ.get("PARC_INSTRUCTION_MODE", "alias").strip().lowe
 
 | 施策 | 根拠 | 備考 |
 |---|---|---|
+| **品質フィルタ LoRA（Phase5）** | デモを jerk/SPARC/EEF回転で上位選定し BC。checkpoint は success+collision+滑らかさの複合 proxy | `score_episode_quality.py` → `train.py --phase5` → `run_phase4_proxy_select.py --phase5` |
 | 画像augmentation追加 | `train.py`の`build_train_command()`は`--dataset.video_backend`と`--dataset.use_imagenet_stats=false`のみで、color jitter/random cropの類は一切渡していないことを確認済み | LIBERO派生タスクは光源・視点差に弱いことが多く、augmentationは定番かつローリスク |
 | Model soup（重み平均） | Stage2/Phase3/Phase4はいずれもStage2マージ済みモデルから分岐した兄弟モデル | 3つのマージ済み`model.safetensors`を単純平均するだけで試せる。推論コストは増えない |
 | Phase4のnormalizer統計をpreserve版とrecompute版で両方proxy評価 | `PHASE4_PRESERVE_BASE_NORMALIZER=True`はStage2互換性のための選択で、性能面で検証されたわけではない | `merge_lora.py`のフラグを切り替えて比較するだけ |
@@ -70,9 +173,10 @@ INSTRUCTION_MODE = os.environ.get("PARC_INSTRUCTION_MODE", "alias").strip().lowe
 
 ## まとめ：優先順位
 
-1. **① instruction正規化モードの見直し**（env var変更のみで試せる）
-2. **② Phase4選定ロジックの統合**（再学習不要、選定・デプロイ手順の整理のみ）
-3. **③ チャンク境界ジャークの一般化**（推論コード側の小改修）
-4. 中コスト施策（augmentation・model soup・normalizer比較・episode増量）は①〜③の効果を見てから着手
+1. **① instruction正規化 → `generic` 既定化（実施済み）**
+2. **③ chunk スケール → 攻撃的 / milder ramp とも否決、既定 `off`（実施済み）**
+3. **② Phase4選定一本化 → 全候補が stage2 に敗北、stage2 維持（実施済み）**
+4. **④ temporal ensemble → `te_s5_c0.01` 採用（実施済み）**
+5. 残る中コスト施策（augmentation・model soup 等）
 
-どれから着手するか、あるいは①のenv var切り替えを実際にproxy評価で試すところから一緒にやるか、決めてもらえれば実装に入る。
+提出物は **stage2 + `generic` + chunk `off` + temporal ensemble `s5/c0.01`**。

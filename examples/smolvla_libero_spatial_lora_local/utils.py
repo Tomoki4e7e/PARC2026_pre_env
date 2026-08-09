@@ -168,6 +168,9 @@ def _episodes_for_task(
     episodes_per_task: int,
     *,
     suite_name: str,
+    quality_by_index: dict | None = None,
+    min_quality: float | None = None,
+    oversample_top_frac: float = 0.0,
 ) -> list[int]:
     actual_task = available_by_normalized.get(normalize_task_name(task_name))
     if actual_task is None:
@@ -182,6 +185,16 @@ def _episodes_for_task(
             f"[{suite_name}] {actual_task!r}: need {episodes_per_task} episodes, "
             f"only {len(pool)} available"
         )
+    if quality_by_index:
+        from episode_quality import choose_top_quality
+
+        return choose_top_quality(
+            pool,
+            quality_by_index,
+            episodes_per_task,
+            min_quality=min_quality,
+            oversample_top_frac=oversample_top_frac,
+        )
     return choose_evenly_spaced(pool, episodes_per_task)
 
 
@@ -191,14 +204,38 @@ def select_training_episodes(
     suites: list,
     *,
     task_episode_overrides: dict[str, int] | None = None,
+    quality_cache_path: Path | None = None,
+    min_quality: float | None = None,
+    oversample_top_frac: float = 0.0,
 ) -> tuple[list[int], dict[str, list[int]]]:
-    """multi-suite 学習用エピソード index を返す。"""
+    """multi-suite 学習用エピソード index を返す。
+
+    quality_cache_path が指定されていれば、均等間隔ではなく
+    jerk/SPARC/回転総量ベースの品質上位を優先選定する。
+    """
     from lerobot.datasets.dataset_metadata import LeRobotDatasetMetadata
 
     overrides = {
         normalize_task_name(key): value
         for key, value in (task_episode_overrides or {}).items()
     }
+
+    quality_by_index = None
+    if quality_cache_path is not None:
+        from episode_quality import load_quality_cache
+
+        cache_path = Path(quality_cache_path)
+        if not cache_path.is_file():
+            raise FileNotFoundError(
+                f"quality cache がありません: {cache_path}\n"
+                "先に score_episode_quality.py を実行してください。"
+            )
+        quality_by_index = load_quality_cache(cache_path)
+        print(
+            f"[select] quality filter enabled: {cache_path} "
+            f"({len(quality_by_index)} scored episodes, "
+            f"min_quality={min_quality}, oversample_top_frac={oversample_top_frac})"
+        )
 
     dataset_metadata = run_hf_with_retry(
         lambda: LeRobotDatasetMetadata(dataset_repo, revision=dataset_revision)
@@ -227,6 +264,9 @@ def select_training_episodes(
                 available_by_normalized,
                 count,
                 suite_name=suite.name,
+                quality_by_index=quality_by_index,
+                min_quality=min_quality,
+                oversample_top_frac=oversample_top_frac,
             )
             selected_by_task[task_name] = picked
             all_indices.update(picked)

@@ -20,6 +20,11 @@
     # Phase 4: LIBERO-90 多様タスク + replay LoRA（OOD early stopping 用）
     python examples/smolvla_libero_spatial_lora_local/train.py --phase4 --skip-merge
 
+    # Phase 5: 品質フィルタ（低 jerk / 良 SPARC / 低回転）デモでの追加 LoRA
+    python examples/smolvla_libero_spatial_lora_local/score_episode_quality.py --phase5
+    python examples/smolvla_libero_spatial_lora_local/train.py --phase5 --skip-merge
+    python examples/smolvla_libero_spatial_lora_local/run_phase4_proxy_select.py --phase5
+
     # 3) マージのみ再実行
     python examples/smolvla_libero_spatial_lora_local/merge_lora.py
 """
@@ -249,10 +254,19 @@ def run_training(
     training_env["HF_HUB_DISABLE_XET"] = "1"
     training_env["HF_HOME"] = os.environ.get("HF_HOME", "")
     training_env["HF_LEROBOT_HOME"] = os.environ.get("HF_LEROBOT_HOME", "")
+    # conda activate なしで python 直実行しても lerobot-train を見つけられるようにする
+    conda_bin = Path(sys.executable).resolve().parent
+    path_parts = training_env.get("PATH", "").split(os.pathsep)
+    if str(conda_bin) not in path_parts:
+        training_env["PATH"] = str(conda_bin) + os.pathsep + training_env.get("PATH", "")
 
     shutil.rmtree(config.OUTPUT_DIR, ignore_errors=True)
 
+    # 絶対パスで起動（PATH 依存をさらに減らす）
+    lerobot_train = conda_bin / "lerobot-train"
     command = build_train_command(base_model_local, episode_indices, job_name=job_name)
+    if lerobot_train.is_file():
+        command[0] = str(lerobot_train)
     print("Preparing data and starting training...")
     print(f"  output: {config.OUTPUT_DIR}")
     print(f"  mixed precision: {mixed_precision}")
@@ -351,6 +365,17 @@ def main() -> None:
         action="store_true",
         help="LIBERO-90 多様タスク + replay LoRA（ローカル集約データセット）",
     )
+    parser.add_argument(
+        "--phase5",
+        action="store_true",
+        help="品質フィルタ済みデモでの追加 LoRA（jerk/SPARC/回転総量）",
+    )
+    parser.add_argument(
+        "--quality-cache",
+        type=Path,
+        default=None,
+        help="episode_quality JSON（指定時は品質上位選定を有効化）",
+    )
     args = parser.parse_args()
 
     stage_flags = sum(
@@ -360,13 +385,14 @@ def main() -> None:
             args.track1_stage2,
             args.phase3,
             args.phase4,
+            args.phase5,
             args.spatial_only,
         )
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --phase3 / --phase4 / --spatial-only "
-            "は同時に指定できません"
+            "--stage1 / --track1-stage2 / --phase3 / --phase4 / --phase5 / "
+            "--spatial-only は同時に指定できません"
         )
     if args.stage1 and args.track1_stage2:
         parser.error("--stage1 と --track1-stage2 は同時に指定できません")
@@ -424,6 +450,11 @@ def main() -> None:
                 )
             ],
         )
+    elif args.phase5:
+        config.apply_phase5_config()
+        suites = list(config.PHASE5_TRAIN_SUITES)
+        task_episode_overrides = config.PHASE5_TASK_EPISODE_OVERRIDES
+        job_name = "smolvla_libero_plus_phase5_quality_lora"
     elif args.phase3:
         config.apply_phase3_config()
         suites = list(config.PHASE3_TRAIN_SUITES)
@@ -446,12 +477,18 @@ def main() -> None:
         else:
             job_name = "smolvla_libero_plus_multisuite_lora"
 
+    if args.quality_cache is not None:
+        config.QUALITY_CACHE_PATH = args.quality_cache
+
     if not args.phase4:
         episode_indices, selected_by_task = select_training_episodes(
             config.DATASET_REPO,
             config.DATASET_REVISION,
             suites,
             task_episode_overrides=task_episode_overrides,
+            quality_cache_path=config.QUALITY_CACHE_PATH,
+            min_quality=config.QUALITY_MIN_QUALITY,
+            oversample_top_frac=config.QUALITY_OVERSAMPLE_TOP_FRAC,
         )
         print(f"Training suites: {[suite.name for suite in suites]}")
         print_episode_selection_summary(selected_by_task, suites)
@@ -475,7 +512,9 @@ def main() -> None:
     if not args.skip_merge:
         merge_script = SCRIPT_DIR / "merge_lora.py"
         merge_cmd = [sys.executable, str(merge_script)]
-        if args.phase4:
+        if args.phase5:
+            merge_cmd.append("--phase5")
+        elif args.phase4:
             merge_cmd.append("--phase4")
         elif args.phase3:
             merge_cmd.append("--phase3")

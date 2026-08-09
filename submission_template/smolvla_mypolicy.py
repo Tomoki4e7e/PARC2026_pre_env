@@ -247,19 +247,57 @@ _STOPWORDS = frozenset(
     """.split()
 )
 
-# instruction 正規化モード（既定 alias）。A/B 比較用に環境変数で切替できる。
+# instruction 正規化モード（既定 generic）。A/B 比較用に環境変数で切替できる。
 #   match:   generic + 未知 instruction も最も近い学習 task 文字列へ写す（実験専用）
-#   generic: 全タスク対応表 + 規則書き換え + 変種サフィックス除去
-#   alias:   既知の完全一致対応表のみ。未知 task は原文を保持する本番安全モード
+#   generic: 全タスク対応表 + 規則書き換え + 変種サフィックス除去（推奨・既定）
+#   alias:   既知の完全一致対応表のみ。未知 task は原文を保持（サフィックス非除去）
 #   legacy:  example 4 タスクのみの対応表（提出済みバージョンの挙動）
 #   raw:     小文字化のみ
-INSTRUCTION_MODE = os.environ.get("PARC_INSTRUCTION_MODE", "alias").strip().lower()
+# 2026-08-09 A/B (stage2): holdout_spatial alias 0.400 → generic/match 0.867。
+# inset/language は 3 モード同点。match は OOD 誤写像リスクのみ増えるため不採用。
+INSTRUCTION_MODE = os.environ.get("PARC_INSTRUCTION_MODE", "generic").strip().lower()
 
-# 新 chunk 先頭 step のスケーリングを使うか（0 で無効化）
+# 新 chunk 先頭の並進・回転スケール（gripper は変更しない）。
+# PARC_CHUNK_SCALE=0 で無効化。
+#   off    : 無効（推奨・既定。2026-08-09 A/B で最良）
+#   ramp   : 全タスク共通で先頭 N step にランプ（提案③。攻撃的設定は悪化）
+#   legacy : タスク辞書に載った instruction の先頭 1 step のみ（旧挙動。inset 悪化）
 ENABLE_CHUNK_SCALE = os.environ.get("PARC_CHUNK_SCALE", "1").strip() not in ("0", "false")
+CHUNK_SCALE_MODE = os.environ.get("PARC_CHUNK_SCALE_MODE", "off").strip().lower()
+if not ENABLE_CHUNK_SCALE:
+    CHUNK_SCALE_MODE = "off"
 
-# Phase 1: 新 chunk 先頭 step の並進・回転スケール（gripper は変更しない）
-# collision_rate が高いタスク向け。未指定は 1.0（スケールなし）。
+# Temporal ensemble（ACT Algorithm 2）。推論時のみ。追加学習は不要。
+#   PARC_TEMPORAL_ENSEMBLE=0|1（既定 1。2026-08-09 A/B で stage2 を全面上回り採用）
+#   PARC_TE_COEFF: 指数重み係数（ACT 既定 0.01。正→古い予測を重視）
+#   PARC_TE_STRIDE: 何 step ごとに再推論するか（採用値 5。SmolVLA ~150ms/推論）
+#   PARC_TE_CHUNK: 予測 chunk の先頭何 step を ensemble に使うか（既定=モデル chunk_size）
+ENABLE_TEMPORAL_ENSEMBLE = os.environ.get("PARC_TEMPORAL_ENSEMBLE", "1").strip().lower() not in (
+    "0",
+    "false",
+    "off",
+)
+TEMPORAL_ENSEMBLE_COEFF = float(os.environ.get("PARC_TE_COEFF", "0.01"))
+TEMPORAL_ENSEMBLE_STRIDE = max(1, int(os.environ.get("PARC_TE_STRIDE", "5")))
+_TE_CHUNK_RAW = os.environ.get("PARC_TE_CHUNK", "").strip()
+TEMPORAL_ENSEMBLE_CHUNK: int | None = int(_TE_CHUNK_RAW) if _TE_CHUNK_RAW else None
+
+
+def _parse_chunk_ramp(raw: str) -> tuple[float, ...]:
+    values = tuple(float(part.strip()) for part in raw.split(",") if part.strip())
+    if not values:
+        raise ValueError("PARC_CHUNK_SCALE_RAMP が空です")
+    if any(value <= 0.0 for value in values):
+        raise ValueError(f"PARC_CHUNK_SCALE_RAMP は正の値である必要があります: {values}")
+    return values
+
+
+# 新 chunk 先頭 N step のスケール列。例: "0.6,0.8,1.0" → 3 step かけて復帰。
+CHUNK_RAMP_SCALES: tuple[float, ...] = _parse_chunk_ramp(
+    os.environ.get("PARC_CHUNK_SCALE_RAMP", "0.6,0.8,1.0")
+)
+
+# legacy モード専用: instruction ごとの先頭 1 step スケール。
 CHUNK_FIRST_STEP_ACTION_SCALE: dict[str, float] = {
     "pick up the black bowl in the top drawer of the wooden cabinet and place it on the plate": 0.8,
     "pick up the tomato sauce and place it in the basket": 0.75,
@@ -393,6 +431,112 @@ def _scale_action_motion(action: np.ndarray, scale: float) -> np.ndarray:
     return scaled
 
 
+def _chunk_scale_for_step(instruction: str, step_in_chunk: int) -> float:
+    """新 chunk 内の step 番号（0始まり）に対する並進・回転スケール。"""
+    if CHUNK_SCALE_MODE == "off":
+        return 1.0
+    if CHUNK_SCALE_MODE == "legacy":
+        if step_in_chunk != 0:
+            return 1.0
+        return CHUNK_FIRST_STEP_ACTION_SCALE.get(instruction, 1.0)
+    # ramp（既定）: 全タスク共通
+    if step_in_chunk < 0:
+        return 1.0
+    if step_in_chunk >= len(CHUNK_RAMP_SCALES):
+        return 1.0
+    return CHUNK_RAMP_SCALES[step_in_chunk]
+
+
+class TemporalEnsembler:
+    """ACT の temporal ensembling（https://huggingface.co/papers/2304.13705 Algorithm 2）。
+
+    w_i = exp(-coeff * i) で古い予測ほど重く（coeff>0）、オンライン平均を更新する。
+    stride>1 のときは再推論の間は ``consume()`` のみ行い、重み付き平均バッファを進める。
+    """
+
+    def __init__(self, coeff: float, chunk_size: int) -> None:
+        if chunk_size < 1:
+            raise ValueError(f"chunk_size must be >= 1, got {chunk_size}")
+        self.chunk_size = int(chunk_size)
+        self.coeff = float(coeff)
+        self.ensemble_weights = torch.exp(
+            -self.coeff * torch.arange(self.chunk_size, dtype=torch.float32)
+        )
+        self.ensemble_weights_cumsum = torch.cumsum(self.ensemble_weights, dim=0)
+        self.reset()
+
+    def reset(self) -> None:
+        self.ensembled_actions = None
+        self.ensembled_actions_count = None
+
+    def _ensure_weights(self, device: torch.device) -> None:
+        self.ensemble_weights = self.ensemble_weights.to(device=device)
+        self.ensemble_weights_cumsum = self.ensemble_weights_cumsum.to(device=device)
+
+    def consume(self) -> torch.Tensor:
+        """新しい予測なしで、バッファ先頭の平均アクションを返す。"""
+        if self.ensembled_actions is None or self.ensembled_actions.shape[1] == 0:
+            raise RuntimeError("TemporalEnsembler.consume() called with empty buffer")
+        action = self.ensembled_actions[:, 0]
+        self.ensembled_actions = self.ensembled_actions[:, 1:]
+        self.ensembled_actions_count = self.ensembled_actions_count[1:]
+        return action
+
+    def update(self, actions: torch.Tensor) -> torch.Tensor:
+        """(batch, chunk, dim) の新予測でバッファを更新し、先頭アクションを返す。"""
+        if actions.dim() != 3:
+            raise ValueError(f"expected (B, T, D) actions, got {tuple(actions.shape)}")
+        if actions.shape[1] < 1:
+            raise ValueError("empty action chunk")
+        # 予測が設定 chunk より長い場合は先頭のみ使用
+        if actions.shape[1] > self.chunk_size:
+            actions = actions[:, : self.chunk_size]
+        self._ensure_weights(actions.device)
+
+        if self.ensembled_actions is None or self.ensembled_actions.shape[1] == 0:
+            self.ensembled_actions = actions.clone()
+            self.ensembled_actions_count = torch.ones(
+                (actions.shape[1], 1),
+                dtype=torch.long,
+                device=actions.device,
+            )
+        else:
+            remaining = self.ensembled_actions.shape[1]
+            overlap = min(remaining, actions.shape[1])
+            if overlap > 0:
+                counts = self.ensembled_actions_count[:overlap]
+                # ACT online average（stride>1 で remaining < chunk-1 でも可）
+                self.ensembled_actions[:, :overlap] *= self.ensemble_weights_cumsum[
+                    counts - 1
+                ]
+                self.ensembled_actions[:, :overlap] += (
+                    actions[:, :overlap] * self.ensemble_weights[counts]
+                )
+                self.ensembled_actions[:, :overlap] /= self.ensemble_weights_cumsum[
+                    counts
+                ]
+                self.ensembled_actions_count[:overlap] = torch.clamp(
+                    counts + 1, max=self.chunk_size
+                )
+            if actions.shape[1] > overlap:
+                self.ensembled_actions = torch.cat(
+                    [self.ensembled_actions[:, :overlap], actions[:, overlap:]], dim=1
+                )
+                new_counts = torch.ones(
+                    (actions.shape[1] - overlap, 1),
+                    dtype=torch.long,
+                    device=actions.device,
+                )
+                self.ensembled_actions_count = torch.cat(
+                    [self.ensembled_actions_count[:overlap], new_counts], dim=0
+                )
+            else:
+                self.ensembled_actions = self.ensembled_actions[:, :overlap]
+                self.ensembled_actions_count = self.ensembled_actions_count[:overlap]
+
+        return self.consume()
+
+
 def _build_lerobot_observation(
     obs: dict[str, np.ndarray],
     instruction: str,
@@ -524,8 +668,15 @@ class SmolVLAMyPolicy(BasePolicy):
             )
 
         self._visual_layout = _visual_layout_from_preprocessor(model_path)
+        te_chunk = TEMPORAL_ENSEMBLE_CHUNK
         print(
             f"[smolvla] instruction_mode={INSTRUCTION_MODE} "
+            f"chunk_scale_mode={CHUNK_SCALE_MODE} "
+            f"chunk_ramp={CHUNK_RAMP_SCALES if CHUNK_SCALE_MODE == 'ramp' else '-'} "
+            f"temporal_ensemble={int(ENABLE_TEMPORAL_ENSEMBLE)} "
+            f"te_coeff={TEMPORAL_ENSEMBLE_COEFF if ENABLE_TEMPORAL_ENSEMBLE else '-'} "
+            f"te_stride={TEMPORAL_ENSEMBLE_STRIDE if ENABLE_TEMPORAL_ENSEMBLE else '-'} "
+            f"te_chunk={te_chunk if ENABLE_TEMPORAL_ENSEMBLE else '-'} "
             f"visual_layout={self._visual_layout} "
             f"aliases={len(INSTRUCTION_ALIASES)} canonical={len(CANONICAL_TASKS)} "
             f"paraphrase_classes={len(_PARAPHRASE_CENTROIDS)}",
@@ -554,16 +705,78 @@ class SmolVLAMyPolicy(BasePolicy):
         )
 
         self.instruction = ""
+        self._steps_into_chunk = 0
+        self._te_steps_since_infer = 0
+        self._temporal_ensembler: TemporalEnsembler | None = None
+        if ENABLE_TEMPORAL_ENSEMBLE:
+            chunk = te_chunk or int(self.policy.config.chunk_size)
+            chunk = max(1, min(chunk, int(self.policy.config.chunk_size)))
+            self._temporal_ensembler = TemporalEnsembler(
+                TEMPORAL_ENSEMBLE_COEFF, chunk
+            )
+            print(
+                f"[smolvla] temporal ensemble enabled "
+                f"coeff={TEMPORAL_ENSEMBLE_COEFF} stride={TEMPORAL_ENSEMBLE_STRIDE} "
+                f"chunk={chunk}",
+                flush=True,
+            )
 
     def reset(self, instruction: str = "") -> None:
         self.instruction = _normalize_instruction(instruction)
+        self._steps_into_chunk = 0
+        self._te_steps_since_infer = 0
         self.policy.reset()
+        if self._temporal_ensembler is not None:
+            self._temporal_ensembler.reset()
+
+    def _predict_action_chunk(self, obs: dict[str, np.ndarray]) -> torch.Tensor:
+        """観測から (1, T, 7) の action chunk を推論する（postprocess 済み）。"""
+        frame = _to_preprocessor_frame(
+            _build_lerobot_observation(
+                obs, self.instruction, visual_layout=self._visual_layout
+            )
+        )
+        with torch.inference_mode():
+            batch = self.preprocess(frame)
+            actions = self.policy.predict_action_chunk(batch)
+            # postprocess は単一 action (B, D) 想定のため step ごとに適用
+            processed = []
+            for t in range(actions.shape[1]):
+                step = self.postprocess(actions[:, t])
+                if isinstance(step, torch.Tensor) and step.dim() == 1:
+                    step = step.unsqueeze(0)
+                processed.append(step)
+            stacked = torch.stack(processed, dim=1)
+        return stacked
 
     def get_action(self, obs: dict[str, np.ndarray]) -> np.ndarray:
         from lerobot.utils.constants import ACTION
 
+        if self._temporal_ensembler is not None:
+            need_infer = (
+                self._temporal_ensembler.ensembled_actions is None
+                or self._temporal_ensembler.ensembled_actions.shape[1] == 0
+                or self._te_steps_since_infer >= TEMPORAL_ENSEMBLE_STRIDE
+            )
+            with torch.inference_mode():
+                if need_infer:
+                    chunk = self._predict_action_chunk(obs)
+                    # ensembler は chunk_size まで使う
+                    action_t = self._temporal_ensembler.update(chunk)
+                    self._te_steps_since_infer = 1
+                else:
+                    action_t = self._temporal_ensembler.consume()
+                    self._te_steps_since_infer += 1
+            action = action_t.detach().cpu().numpy()
+            action = np.asarray(action, dtype=np.float32).reshape(-1)
+            if action.shape != (7,):
+                raise ValueError(f"Expected action shape (7,), got {action.shape}")
+            return action
+
         # 新 chunk 生成直前かどうか（queue 空 = 次の select_action で推論が走る）
         new_chunk = len(self.policy._queues[ACTION]) == 0
+        if new_chunk:
+            self._steps_into_chunk = 0
 
         frame = _to_preprocessor_frame(
             _build_lerobot_observation(
@@ -582,9 +795,9 @@ class SmolVLAMyPolicy(BasePolicy):
         if action.shape != (7,):
             raise ValueError(f"Expected action shape (7,), got {action.shape}")
 
-        if new_chunk and ENABLE_CHUNK_SCALE:
-            scale = CHUNK_FIRST_STEP_ACTION_SCALE.get(self.instruction, 1.0)
-            action = _scale_action_motion(action, scale)
+        scale = _chunk_scale_for_step(self.instruction, self._steps_into_chunk)
+        action = _scale_action_motion(action, scale)
+        self._steps_into_chunk += 1
 
         return action
 

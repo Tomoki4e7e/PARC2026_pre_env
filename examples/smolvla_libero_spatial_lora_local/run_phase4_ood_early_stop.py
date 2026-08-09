@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Phase4 checkpoint を OOD-90 固定セットで評価し、early stopping する。
+"""[DEPRECATED] Phase4 checkpoint を OOD-90 だけで early stopping する旧スクリプト。
 
-各 checkpoint を merge → deploy → policy server 再起動 → run_ood90_eval し、
-overall_score 最大の checkpoint を採用する。
+出荷決定は必ず `run_phase4_unified_select.py` を使うこと。
+本スクリプトは履歴互換のため残すが、`deploy_model.sh phase4` にはもう
+直接つながらない（silent fallback も廃止済み）。
 """
 
 from __future__ import annotations
@@ -107,7 +108,7 @@ def evaluate_checkpoint(
             str(step),
         ]
     )
-    run(["bash", str(SCRIPT_DIR / "deploy_model.sh"), "phase4"])
+    run(["bash", str(SCRIPT_DIR / "deploy_model.sh"), "phase4_v2"])
     stop_policy_server()
     server = start_policy_server(port)
     try:
@@ -142,6 +143,7 @@ def evaluate_checkpoint(
 
 
 def main() -> None:
+    print("[DEPRECATED] 出荷選定は run_phase4_unified_select.py を使ってください。", flush=True)
     parser = argparse.ArgumentParser(description="Phase4 OOD early stopping")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--n-episodes", type=int, default=5)
@@ -210,7 +212,7 @@ def main() -> None:
             str(best["checkpoint_step"]),
         ]
     )
-    run(["bash", str(SCRIPT_DIR / "deploy_model.sh"), "phase4"])
+    run(["bash", str(SCRIPT_DIR / "deploy_model.sh"), "phase4_v2"])
 
     print("\n=== early stopping result ===")
     print(f"best checkpoint: {best['checkpoint_step']:06d}")

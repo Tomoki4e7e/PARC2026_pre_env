@@ -34,24 +34,39 @@ case "$VARIANT" in
     SRC="$WORK/smolvla_libero_plus_phase3_holdout_merged"
     ;;
   phase4)
-    # v2（proxy 選定・normalizer 固定）を優先。無ければ from_stage2 / legacy へフォールバック。
-    SRC="$WORK/smolvla_libero_diverse_phase4_v2_merged"
-    if [ ! -f "$SRC/config.json" ]; then
-      SRC="$WORK/smolvla_libero_diverse_phase4_from_stage2_merged"
+    # 統一選定の結果のみを使う（silent fallback 禁止）。
+    # 未実行なら明示エラー。選定結果が stage2 なら stage2 を出す。
+    SEL_JSON="$ROOT/results/phase4_unified_select/selection.json"
+    if [ ! -f "$SEL_JSON" ]; then
+      echo "[deploy] ERROR: Phase4 統一選定が未実行です。"
+      echo "  先に: /home/cm-pc/.local/smolvla-conda-env/bin/python \\"
+      echo "    $SCRIPT_DIR/run_phase4_unified_select.py"
+      echo "  明示指定: phase4_v2 / phase4_from_stage2 / phase4_legacy / stage2"
+      exit 1
     fi
-    if [ ! -f "$SRC/config.json" ]; then
-      SRC="$WORK/smolvla_libero_diverse_phase4_merged"
-    fi
+    SRC="$(python3 -c "import json; print(json.load(open(r'$SEL_JSON'))['selected_model_dir'])")"
+    echo "[deploy] phase4 → unified selection: $(python3 -c "import json; print(json.load(open(r'$SEL_JSON'))['selected'])")"
     ;;
   phase4_v2)
     SRC="$WORK/smolvla_libero_diverse_phase4_v2_merged"
     ;;
+  phase4_from_stage2)
+    SRC="$WORK/smolvla_libero_diverse_phase4_from_stage2_merged"
+    ;;
   phase4_legacy)
     SRC="$WORK/smolvla_libero_diverse_phase4_merged"
     ;;
+  phase4_selected)
+    SRC="$WORK/smolvla_libero_phase4_selected_merged"
+    ;;
+  phase5)
+    SRC="$WORK/smolvla_libero_plus_phase5_quality_merged"
+    ;;
   *)
     echo "[deploy] ERROR: unknown variant '$VARIANT'"
-    echo "  use: base, multisuite, spatial, stage2, phase3, phase4, phase4_v2, phase4_legacy"
+    echo "  use: base, multisuite, spatial, stage2, phase3,"
+    echo "       phase4 (unified selection), phase4_v2, phase4_from_stage2,"
+    echo "       phase4_legacy, phase4_selected, phase5"
     exit 1
     ;;
 esac

@@ -113,6 +113,11 @@ def main() -> None:
         help="第4段階 LIBERO-90 多様タスク LoRA 出力をマージする",
     )
     parser.add_argument(
+        "--phase5",
+        action="store_true",
+        help="第5段階 品質フィルタ LoRA 出力をマージする",
+    )
+    parser.add_argument(
         "--steps",
         type=int,
         default=None,
@@ -121,14 +126,24 @@ def main() -> None:
     args = parser.parse_args()
 
     stage_flags = sum(
-        int(x) for x in (args.stage1, args.track1_stage2, args.phase3, args.phase4)
+        int(x)
+        for x in (
+            args.stage1,
+            args.track1_stage2,
+            args.phase3,
+            args.phase4,
+            args.phase5,
+        )
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --phase3 / --phase4 は同時に指定できません"
+            "--stage1 / --track1-stage2 / --phase3 / --phase4 / --phase5 "
+            "は同時に指定できません"
         )
 
-    if args.phase4:
+    if args.phase5:
+        config.apply_phase5_config()
+    elif args.phase4:
         config.apply_phase4_config()
     elif args.phase3:
         config.apply_phase3_config()
