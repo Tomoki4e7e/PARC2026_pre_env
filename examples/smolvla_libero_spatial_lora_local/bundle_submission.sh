@@ -14,11 +14,21 @@ SUB="$ROOT/submission_template"
 LEROBOT_SRC="$SCRIPT_DIR/work/lerobot/src/lerobot"
 VENDOR="$SUB/vendor/lerobot"
 OUTPUT="${1:-$ROOT/submission.zip}"
+VLM_CACHE="$SCRIPT_DIR/work/hf_cache/hub/models--HuggingFaceTB--SmolVLM2-500M-Video-Instruct"
+VLM_REV="$(cat "$VLM_CACHE/refs/main" 2>/dev/null || true)"
+VLM_SNAPSHOT="$VLM_CACHE/snapshots/$VLM_REV"
 
 if [ ! -d "$LEROBOT_SRC" ]; then
     echo "[bundle] ERROR: LeRobot ソースがありません。先に setup_lerobot.sh を実行してください。"
     exit 1
 fi
+if [ -z "$VLM_REV" ] || [ ! -d "$VLM_SNAPSHOT" ]; then
+    echo "[bundle] ERROR: SmolVLM processor cache がありません: $VLM_SNAPSHOT"
+    exit 1
+fi
+
+python3 "$SCRIPT_DIR/bundle_offline_processor.py" \
+    "$SUB/model_weights/smolvla_spatial_lora" "$VLM_SNAPSHOT"
 
 echo "[bundle] vendor/lerobot を同期..."
 rm -rf "$SUB/vendor"

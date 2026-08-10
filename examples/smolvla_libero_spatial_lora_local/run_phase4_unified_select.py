@@ -119,7 +119,17 @@ def deploy_src(src: Path) -> None:
     find_cmd = ["find", str(dest), "-mindepth", "1", "-delete"]
     subprocess.run(find_cmd, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(
-        ["rsync", "-aL", "--delete", "--exclude", "train_config.json", f"{src}/", f"{dest}/"],
+        [
+            "rsync",
+            "-aL",
+            "--delete",
+            "--exclude",
+            "train_config.json",
+            "--exclude",
+            "interpolation.json",
+            f"{src}/",
+            f"{dest}/",
+        ],
         check=True,
     )
     print(f"[unified] deployed {src.name} → submission_template", flush=True)
@@ -266,8 +276,12 @@ def evaluate_candidate(
                 for key in hold_metrics[0]
             }
 
-        ood = run_ood(port, f"unified_{name}", ood_episodes, seed)
-        print(f"[unified] {name} ood90={ood:.3f}", flush=True)
+        if ood_episodes > 0:
+            ood = run_ood(port, f"unified_{name}", ood_episodes, seed)
+            print(f"[unified] {name} ood90={ood:.3f}", flush=True)
+        else:
+            ood = None
+            print(f"[unified] {name} ood90=SKIP", flush=True)
     finally:
         proc.terminate()
         try:
@@ -319,9 +333,10 @@ def decide(results: dict[str, dict]) -> tuple[str, dict[str, dict[str, bool]]]:
         g = {
             "inset_not_worse": row["inset"]["success"]
             >= baseline["inset"]["success"] - 1e-9,
-            "ood_not_worse": row["ood90"] >= baseline["ood90"] - 1e-9,
             "proxy_beats_stage2": row["proxy_score"] > baseline["proxy_score"] + 1e-9,
         }
+        if row["ood90"] is not None and baseline["ood90"] is not None:
+            g["ood_not_worse"] = row["ood90"] >= baseline["ood90"] - 1e-9
         if row["holdout_available"] and baseline["holdout_available"]:
             g["clean_holdout_not_worse"] = (
                 float(row["holdout_composite"])
@@ -438,9 +453,10 @@ def main() -> None:
             if row["holdout_available"]
             else "  N/A"
         )
+        ood = f"{row['ood90']:.3f}" if row["ood90"] is not None else "N/A"
         print(
             f"{name:22s} {row['inset']['success']:7.3f} {hold:>7s} "
-            f"{row['ood90']:7.3f} {row['proxy_score']:7.3f}"
+            f"{ood:>7s} {row['proxy_score']:7.3f}"
         )
     print(f"gates: {json.dumps(gates, ensure_ascii=False)}")
     print(f"selected: {selected}")

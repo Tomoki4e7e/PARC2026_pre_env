@@ -169,6 +169,83 @@ ACT [arXiv:2304.13705](https://huggingface.co/papers/2304.13705) Algorithm 2 の
 | Phase4のnormalizer統計をpreserve版とrecompute版で両方proxy評価 | `PHASE4_PRESERVE_BASE_NORMALIZER=True`はStage2互換性のための選択で、性能面で検証されたわけではない | `merge_lora.py`のフラグを切り替えて比較するだけ |
 | episodes/task の増量 | `TRAIN_EPISODES_PER_TASK=20`など明示的に上限指定 | 特に弱点タスクで頭打ちなら増やす価値あり |
 
+### 画像 augmentation 実装（2026-08-10）
+
+`train.py --augmentation` を追加し、stage2 をベースにした独立 LoRA 候補として実装した。
+旧 stage2 の重みや出力先は上書きしない。
+
+- photometric: brightness、contrast、saturation、hue
+- nonlinear illumination: gamma `0.75–1.35`
+- texture: coarse/fine noise、strength `0.01–0.045`
+- 1フレームにつき最大4変換を重み付き選択し、ランダム順で複合適用
+- 4,000 steps、LR `5e-5 → 5e-6`、LoRA rank/alpha `16/16`
+- 比較: `run_augmentation_select.py` で旧 stage2 と inset / clean hold-out / OOD-90 を同条件評価
+
+### GPU 不検出の原因と解消
+
+初回実行は Codex の通常 sandbox から起動したため、ホストに存在する
+`/dev/nvidia0` / `nvidiactl` / `nvidia-uvm*` が名前空間内へ公開されていなかった。
+その結果、kernel module と RTX 3060 Ti は正常でも `nvidia-smi` と
+`torch.cuda.is_available()` が失敗した。ホスト側では driver `555.42.06`、
+torch `2.6.0+cu124`、CUDA 12.4 の整合性と全 device node を確認できた。
+GPU device を許可した実行環境で起動することで解消し、追加の driver 更新は不要だった。
+
+### 追加学習・stage2 比較（完了・2026-08-10）
+
+実行コマンド:
+
+```bash
+source examples/smolvla_libero_spatial_lora_local/env_smolvla.sh
+/home/cm-pc/.local/smolvla-conda-env/bin/python \
+  examples/smolvla_libero_spatial_lora_local/train.py --augmentation \
+  --log-file examples/smolvla_libero_spatial_lora_local/work/image_augmentation_train.log
+/home/cm-pc/.local/smolvla-conda-env/bin/python \
+  examples/smolvla_libero_spatial_lora_local/run_augmentation_select.py
+```
+
+4,000 step を完走し、最終 loss `0.229`。マージ済み重み SHA-256 は
+`5a84efeb1a99569a3890306d65b4189198ed03a54cbf282c139dbb2c9a768314`。
+現行推論（generic + chunk off + temporal ensemble）で旧 stage2 と同条件評価した。
+
+| candidate | inset success | inset collision | clean holdout | hold collision | OOD-90 | proxy |
+|---|---:|---:|---:|---:|---:|---:|
+| **stage2（維持）** | **0.850** | **0.050** | **0.933** | **0.022** | 0.000 | **1.102** |
+| image augmentation | 0.825 | 0.075 | 0.911 | 0.044 | 0.000 | 1.069 |
+
+新モデルは `inset_not_worse`、`clean_holdout_not_worse`、`proxy_beats_stage2` の
+3ゲートを落とした。色・照明・texture 頑健化の狙いに対し、通常分布での成功率と衝突率が
+悪化したため不採用。選定スクリプトは stage2 を提出テンプレートへ復元済み。
+
+生データ: `results/image_augmentation_select/selection.json`
+
+### Augmentation checkpoint + stage2 補間（採用・2026-08-10）
+
+4k最終モデルの差分が強すぎる可能性を検証するため、既存の1k / 2k / 3k / 4k
+checkpointと、`stage2 + α × (aug4k - stage2)`（α=0.25 / 0.50 / 0.75）を比較した。
+短縮screening（inset 5 / hold-out 3）で全8候補を評価し、通過したα=0.25 / 0.75を
+stage2と本評価（inset 10 / hold-out 5 / OOD 3）した。
+
+| candidate | inset | collision | clean holdout | hold collision | OOD-90 | proxy | 全ゲート |
+|---|---:|---:|---:|---:|---:|---:|---|
+| stage2 | 0.850 | 0.050 | 0.933 | 0.022 | 0.000 | 1.102 | baseline |
+| **blend α=0.25（採用）** | **0.850** | **0.050** | **0.956** | **0.022** | 0.000 | **1.115** | PASS |
+| blend α=0.75 | 0.850 | 0.050 | 0.956 | 0.022 | 0.000 | 1.114 | PASS |
+
+α=0.25は通常4タスクの成功・衝突を維持し、clean object hold-outを0.867→0.933へ
+改善した。spatial 0.933、goal 1.000は維持。proxy最大のα=0.25を出荷候補に採用した。
+checkpoint単体は1k/2kでinsetが0.800へ低下し、3k/4kも本評価へ進める改善がなかった。
+
+再配置:
+
+```bash
+bash examples/smolvla_libero_spatial_lora_local/deploy_model.sh augmentation_selected
+```
+
+生データ:
+
+- screening: `results/augmentation_checkpoint_select/screening.json`
+- final: `results/augmentation_checkpoint_select/selection.json`
+
 ---
 
 ## まとめ：優先順位

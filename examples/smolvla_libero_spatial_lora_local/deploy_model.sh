@@ -30,6 +30,18 @@ case "$VARIANT" in
   stage2)
     SRC="$WORK/smolvla_libero_plus_track1_stage2_merged"
     ;;
+  augmentation)
+    SRC="$WORK/smolvla_libero_plus_image_aug_merged"
+    ;;
+  augmentation_selected)
+    SEL_JSON="$ROOT/results/augmentation_checkpoint_select/selection.json"
+    if [ ! -f "$SEL_JSON" ]; then
+      echo "[deploy] ERROR: Augmentation checkpoint/補間選定が未実行です: $SEL_JSON"
+      exit 1
+    fi
+    SRC="$(python3 -c "import json; print(json.load(open(r'$SEL_JSON'))['selected_model_dir'])")"
+    echo "[deploy] augmentation_selected → $(python3 -c "import json; print(json.load(open(r'$SEL_JSON'))['selected'])")"
+    ;;
   phase3)
     SRC="$WORK/smolvla_libero_plus_phase3_holdout_merged"
     ;;
@@ -64,7 +76,7 @@ case "$VARIANT" in
     ;;
   *)
     echo "[deploy] ERROR: unknown variant '$VARIANT'"
-    echo "  use: base, multisuite, spatial, stage2, phase3,"
+    echo "  use: base, multisuite, spatial, stage2, augmentation, augmentation_selected, phase3,"
     echo "       phase4 (unified selection), phase4_v2, phase4_from_stage2,"
     echo "       phase4_legacy, phase4_selected, phase5"
     exit 1
@@ -90,7 +102,10 @@ fi
 if [ ! -d "$DEST" ]; then
     mkdir -p "$DEST"
 fi
-rsync -aL --delete --exclude 'train_config.json' "$SRC/" "$DEST/"
+rsync -aL --delete \
+    --exclude 'train_config.json' \
+    --exclude 'interpolation.json' \
+    "$SRC/" "$DEST/"
 # policy 実装は submission_template 側を正とする。examples/ の古い写しで上書きすると、
 # instruction safety 等の提出修正が失われるため、ここでは重みだけを切り替える。
 

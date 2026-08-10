@@ -76,7 +76,7 @@
     "scheduler_warmup_steps": 100,
     "scheduler_decay_steps": 10000,
     "scheduler_decay_lr": 1e-05,
-    "vlm_model_name": "HuggingFaceTB/SmolVLM2-500M-Video-Instruct",
+    "vlm_model_name": "model_weights/smolvla_spatial_lora/vlm_processor",
     "load_vlm_weights": false,
     "add_image_special_tokens": false,
     "attention_mode": "cross_attn",

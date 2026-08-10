@@ -228,6 +228,14 @@ def build_train_command(
         f"--peft.r={config.LORA_R}",
         f"--peft.lora_alpha={config.LORA_ALPHA}",
     ]
+    if getattr(config, "IMAGE_AUGMENTATION_ENABLED", False):
+        command.extend(
+            [
+                "--dataset.image_transforms.enable=true",
+                "--dataset.image_transforms.max_num_transforms=4",
+                "--dataset.image_transforms.random_order=true",
+            ]
+        )
     if config.DATASET_ROOT is not None:
         command.append(f"--dataset.root={config.DATASET_ROOT}")
     elif config.DATASET_REVISION is not None:
@@ -356,6 +364,11 @@ def main() -> None:
         help="Track 1 弱点 4 タスク特化 LoRA（旧 merged をベース）",
     )
     parser.add_argument(
+        "--augmentation",
+        action="store_true",
+        help="stage2 ベースの color/contrast/gamma/texture 複合 Augmentation 追加学習",
+    )
+    parser.add_argument(
         "--phase3",
         action="store_true",
         help="hold-out object/goal 弱点 LoRA（stage2 merged をベース）",
@@ -383,6 +396,7 @@ def main() -> None:
         for x in (
             args.stage1,
             args.track1_stage2,
+            args.augmentation,
             args.phase3,
             args.phase4,
             args.phase5,
@@ -391,7 +405,7 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --phase3 / --phase4 / --phase5 / "
+            "--stage1 / --track1-stage2 / --augmentation / --phase3 / --phase4 / --phase5 / "
             "--spatial-only は同時に指定できません"
         )
     if args.stage1 and args.track1_stage2:
@@ -427,6 +441,11 @@ def main() -> None:
     _require_gpu()
     lerobot_src = _require_lerobot()
 
+    # ignored checkout にも再現可能な custom gamma/texture transform を反映する。
+    from apply_lerobot_patches import patch_image_augmentations
+
+    patch_image_augmentations(config.LEROBOT_DIR)
+
     sys.path.insert(0, str(lerobot_src))
 
     if args.phase4:
@@ -460,6 +479,11 @@ def main() -> None:
         suites = list(config.PHASE3_TRAIN_SUITES)
         task_episode_overrides = config.PHASE3_TASK_EPISODE_OVERRIDES
         job_name = "smolvla_libero_plus_phase3_holdout_lora"
+    elif args.augmentation:
+        config.apply_augmentation_config()
+        suites = list(config.TRACK1_STAGE2_TRAIN_SUITES)
+        task_episode_overrides = config.TRACK1_STAGE2_TASK_EPISODE_OVERRIDES
+        job_name = "smolvla_libero_plus_image_aug_lora"
     elif args.track1_stage2:
         config.apply_track1_stage2_config()
         suites = list(config.TRACK1_STAGE2_TRAIN_SUITES)
@@ -514,6 +538,8 @@ def main() -> None:
         merge_cmd = [sys.executable, str(merge_script)]
         if args.phase5:
             merge_cmd.append("--phase5")
+        elif args.augmentation:
+            merge_cmd.append("--augmentation")
         elif args.phase4:
             merge_cmd.append("--phase4")
         elif args.phase3:

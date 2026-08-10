@@ -103,6 +103,11 @@ def main() -> None:
         help="第2段階 Track 1 LoRA 出力をマージする",
     )
     parser.add_argument(
+        "--augmentation",
+        action="store_true",
+        help="画像 Augmentation 追加学習 LoRA 出力をマージする",
+    )
+    parser.add_argument(
         "--phase3",
         action="store_true",
         help="第3段階 hold-out object/goal LoRA 出力をマージする",
@@ -123,6 +128,12 @@ def main() -> None:
         default=None,
         help="マージする checkpoint step（未指定時は config.STEPS）",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=None,
+        help="マージ済みモデルの出力先を上書き（checkpoint比較用）",
+    )
     args = parser.parse_args()
 
     stage_flags = sum(
@@ -130,6 +141,7 @@ def main() -> None:
         for x in (
             args.stage1,
             args.track1_stage2,
+            args.augmentation,
             args.phase3,
             args.phase4,
             args.phase5,
@@ -137,7 +149,7 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --phase3 / --phase4 / --phase5 "
+            "--stage1 / --track1-stage2 / --augmentation / --phase3 / --phase4 / --phase5 "
             "は同時に指定できません"
         )
 
@@ -147,12 +159,16 @@ def main() -> None:
         config.apply_phase4_config()
     elif args.phase3:
         config.apply_phase3_config()
+    elif args.augmentation:
+        config.apply_augmentation_config()
     elif args.track1_stage2:
         config.apply_track1_stage2_config()
     elif args.stage1:
         config.apply_stage1_config()
 
     merge_steps = args.steps if args.steps is not None else config.STEPS
+    if args.output_dir is not None:
+        config.MERGED_MODEL_DIR = args.output_dir.resolve()
 
     ensure_work_dirs(config.WORK_DIR, config.HF_HOME, config.LEROBOT_CACHE)
     set_hf_env(config.HF_HOME, config.LEROBOT_CACHE)
