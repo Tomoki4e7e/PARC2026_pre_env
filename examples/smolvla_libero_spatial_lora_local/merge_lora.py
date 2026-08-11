@@ -108,6 +108,16 @@ def main() -> None:
         help="画像 Augmentation 追加学習 LoRA 出力をマージする",
     )
     parser.add_argument(
+        "--perturbation-replay",
+        action="store_true",
+        help="table/light replay低LR LoRA出力をマージする",
+    )
+    parser.add_argument(
+        "--stove-collision",
+        action="store_true",
+        help="非衝突stove replay重点LoRA出力をマージする",
+    )
+    parser.add_argument(
         "--phase3",
         action="store_true",
         help="第3段階 hold-out object/goal LoRA 出力をマージする",
@@ -142,6 +152,8 @@ def main() -> None:
             args.stage1,
             args.track1_stage2,
             args.augmentation,
+            args.perturbation_replay,
+            args.stove_collision,
             args.phase3,
             args.phase4,
             args.phase5,
@@ -149,11 +161,16 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --phase3 / --phase4 / --phase5 "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --stove-collision / "
+            "--phase3 / --phase4 / --phase5 "
             "は同時に指定できません"
         )
 
-    if args.phase5:
+    if args.stove_collision:
+        config.apply_stove_collision_config()
+    elif args.perturbation_replay:
+        config.apply_perturbation_replay_config()
+    elif args.phase5:
         config.apply_phase5_config()
     elif args.phase4:
         config.apply_phase4_config()

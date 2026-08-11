@@ -1,4 +1,5 @@
 import logging
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -192,6 +193,10 @@ class RolloutExecutor:
                 and k[:-4] not in obj_of_interest
             }
         object_max_disp: dict[str, float] = {}
+        first_collision: dict[str, float | int | str] | None = None
+        collision_diagnostics = os.environ.get(
+            "PARC_COLLISION_DIAGNOSTICS", "0"
+        ).strip().lower() not in ("", "0", "false", "no")
 
 
         episode_seed = self.config.seed + episode_id
@@ -229,6 +234,21 @@ class RolloutExecutor:
                     d = float(np.sum(np.abs(np.asarray(cur) - p0)))
                     if d > object_max_disp.get(name, 0.0):
                         object_max_disp[name] = d
+                    if first_collision is None and d > collision_threshold:
+                        first_collision = {
+                            "object": name,
+                            "step": step + 1,
+                            "displacement": d,
+                        }
+                        if collision_diagnostics:
+                            logger.info(
+                                "  [collision-diagnostic] episode=%d object=%s "
+                                "step=%d displacement=%.9f",
+                                episode_id,
+                                name,
+                                step + 1,
+                                d,
+                            )
 
             total_steps = step + 1
 

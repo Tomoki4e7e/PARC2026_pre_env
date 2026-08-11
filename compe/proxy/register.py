@@ -9,7 +9,7 @@ import torch
 
 _SUITE = "libero_proxy"
 _PKG_DIR = Path(__file__).resolve().parent
-_CSV = _PKG_DIR / "PROXY_TASKS.csv"
+_CSV = Path(os.environ.get("PARC_PROXY_TASKS_CSV", _PKG_DIR / "PROXY_TASKS.csv"))
 
 # 変種ごとの init state 解決規則（LIBERO-plus Benchmark.get_task_init_states と同じ）
 _BASE_SUFFIX_RE = re.compile(r"_(?:table|tb|light|language)_\d+")

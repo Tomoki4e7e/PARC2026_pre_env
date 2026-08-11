@@ -33,6 +33,12 @@ case "$VARIANT" in
   augmentation)
     SRC="$WORK/smolvla_libero_plus_image_aug_merged"
     ;;
+  perturbation_replay)
+    SRC="$WORK/smolvla_track1_perturbation_replay_merged"
+    ;;
+  stove_collision)
+    SRC="$WORK/smolvla_stove_corrective_merged"
+    ;;
   augmentation_selected)
     SEL_JSON="$ROOT/results/augmentation_checkpoint_select/selection.json"
     if [ ! -f "$SEL_JSON" ]; then
@@ -76,7 +82,8 @@ case "$VARIANT" in
     ;;
   *)
     echo "[deploy] ERROR: unknown variant '$VARIANT'"
-    echo "  use: base, multisuite, spatial, stage2, augmentation, augmentation_selected, phase3,"
+    echo "  use: base, multisuite, spatial, stage2, augmentation, perturbation_replay, stove_collision,"
+    echo "       augmentation_selected, phase3,"
     echo "       phase4 (unified selection), phase4_v2, phase4_from_stage2,"
     echo "       phase4_legacy, phase4_selected, phase5"
     exit 1

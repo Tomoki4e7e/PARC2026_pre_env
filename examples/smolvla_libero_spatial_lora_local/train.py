@@ -369,6 +369,16 @@ def main() -> None:
         help="stage2 ベースの color/contrast/gamma/texture 複合 Augmentation 追加学習",
     )
     parser.add_argument(
+        "--perturbation-replay",
+        action="store_true",
+        help="table/light 実レンダリング50:50 replayの低LR LoRA",
+    )
+    parser.add_argument(
+        "--stove-collision",
+        action="store_true",
+        help="非衝突stove replay重点配分の低LR LoRA",
+    )
+    parser.add_argument(
         "--phase3",
         action="store_true",
         help="hold-out object/goal 弱点 LoRA（stage2 merged をベース）",
@@ -397,6 +407,8 @@ def main() -> None:
             args.stage1,
             args.track1_stage2,
             args.augmentation,
+            args.perturbation_replay,
+            args.stove_collision,
             args.phase3,
             args.phase4,
             args.phase5,
@@ -405,7 +417,8 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --phase3 / --phase4 / --phase5 / "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --stove-collision / "
+            "--phase3 / --phase4 / --phase5 / "
             "--spatial-only は同時に指定できません"
         )
     if args.stage1 and args.track1_stage2:
@@ -448,7 +461,26 @@ def main() -> None:
 
     sys.path.insert(0, str(lerobot_src))
 
-    if args.phase4:
+    if args.perturbation_replay or args.stove_collision:
+        if args.stove_collision:
+            config.apply_stove_collision_config()
+            job_name = "smolvla_stove_collision_safe_lora"
+        else:
+            config.apply_perturbation_replay_config()
+            job_name = "smolvla_track1_perturbation_replay_lora"
+        from lerobot.datasets.dataset_metadata import LeRobotDatasetMetadata
+
+        metadata = LeRobotDatasetMetadata(
+            config.DATASET_REPO,
+            root=config.DATASET_ROOT,
+        )
+        episode_indices = list(range(metadata.total_episodes))
+        selected_by_task = {"perturbation_mixed": episode_indices}
+        print(
+            f"Training local replay: episodes={len(episode_indices)} "
+            f"root={config.DATASET_ROOT}"
+        )
+    elif args.phase4:
         config.apply_phase4_config()
         episode_indices = load_phase4_episode_indices()
         selected_by_task = {
@@ -504,7 +536,7 @@ def main() -> None:
     if args.quality_cache is not None:
         config.QUALITY_CACHE_PATH = args.quality_cache
 
-    if not args.phase4:
+    if not args.phase4 and not args.perturbation_replay and not args.stove_collision:
         episode_indices, selected_by_task = select_training_episodes(
             config.DATASET_REPO,
             config.DATASET_REVISION,
@@ -536,7 +568,11 @@ def main() -> None:
     if not args.skip_merge:
         merge_script = SCRIPT_DIR / "merge_lora.py"
         merge_cmd = [sys.executable, str(merge_script)]
-        if args.phase5:
+        if args.stove_collision:
+            merge_cmd.append("--stove-collision")
+        elif args.perturbation_replay:
+            merge_cmd.append("--perturbation-replay")
+        elif args.phase5:
             merge_cmd.append("--phase5")
         elif args.augmentation:
             merge_cmd.append("--augmentation")

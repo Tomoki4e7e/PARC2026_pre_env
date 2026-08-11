@@ -282,6 +282,18 @@ TEMPORAL_ENSEMBLE_STRIDE = max(1, int(os.environ.get("PARC_TE_STRIDE", "5")))
 _TE_CHUNK_RAW = os.environ.get("PARC_TE_CHUNK", "").strip()
 TEMPORAL_ENSEMBLE_CHUNK: int | None = int(_TE_CHUNK_RAW) if _TE_CHUNK_RAW else None
 
+# bowl-on-stove 専用の画像ベース衝突回避シールド（既定は無効、A/B 用）。
+# cream cheese が画像上でボウルの右側にある接近区間だけ、並進 x を負側へ補正する。
+ENABLE_COLLISION_SHIELD = os.environ.get("PARC_COLLISION_SHIELD", "1").strip().lower() not in (
+    "0", "false", "off",
+)
+COLLISION_SHIELD_GAIN = float(os.environ.get("PARC_SHIELD_GAIN", "0.10"))
+COLLISION_SHIELD_START = int(os.environ.get("PARC_SHIELD_START", "18"))
+COLLISION_SHIELD_END = int(os.environ.get("PARC_SHIELD_END", "40"))
+COLLISION_SHIELD_DEBUG = os.environ.get("PARC_SHIELD_DEBUG", "0").strip().lower() not in (
+    "0", "false", "off",
+)
+
 
 def _parse_chunk_ramp(raw: str) -> tuple[float, ...]:
     values = tuple(float(part.strip()) for part in raw.split(",") if part.strip())
@@ -707,6 +719,7 @@ class SmolVLAMyPolicy(BasePolicy):
         self.instruction = ""
         self._steps_into_chunk = 0
         self._te_steps_since_infer = 0
+        self._episode_step = 0
         self._temporal_ensembler: TemporalEnsembler | None = None
         if ENABLE_TEMPORAL_ENSEMBLE:
             chunk = te_chunk or int(self.policy.config.chunk_size)
@@ -725,9 +738,87 @@ class SmolVLAMyPolicy(BasePolicy):
         self.instruction = _normalize_instruction(instruction)
         self._steps_into_chunk = 0
         self._te_steps_since_infer = 0
+        self._episode_step = 0
         self.policy.reset()
         if self._temporal_ensembler is not None:
             self._temporal_ensembler.reset()
+
+    @staticmethod
+    def _estimate_stove_object_centers(image: np.ndarray) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """front画像から (bowl_xy, cream_cheese_xy) を軽量な色分離で推定する。"""
+        rgb = np.asarray(image)
+        if rgb.ndim == 3 and rgb.shape[0] == 3 and rgb.shape[2] != 3:
+            rgb = np.transpose(rgb, (1, 2, 0))
+        if rgb.ndim != 3 or rgb.shape[2] != 3:
+            return None
+        rgb = rgb.astype(np.float32, copy=False)
+        height, width = rgb.shape[:2]
+        scale = min(height, width) / 256.0
+        yy, xx = np.mgrid[:height, :width]
+
+        # cream cheese の箱は、このタスクでは青成分が優勢な小矩形として見える。
+        cream_mask = (
+            (rgb[:, :, 2] > 1.15 * rgb[:, :, 0])
+            & (rgb[:, :, 2] > 1.10 * rgb[:, :, 1])
+            & (rgb[:, :, 2] > 55.0)
+            & (yy < 0.60 * height)
+        )
+        if int(cream_mask.sum()) < max(8, int(40 * scale * scale)):
+            return None
+        cream_x = float(xx[cream_mask].mean())
+        cream_y = float(yy[cream_mask].mean())
+
+        # ボウルは cream cheese の左下近傍にある低彩度・暗色領域。
+        gray = rgb.mean(axis=2)
+        chroma = rgb.max(axis=2) - rgb.min(axis=2)
+        bowl_mask = (
+            (xx > cream_x - 75.0 * scale)
+            & (xx < cream_x - 15.0 * scale)
+            & (yy > cream_y - 25.0 * scale)
+            & (yy < cream_y + 35.0 * scale)
+            & (gray < 115.0)
+            & (chroma < 28.0)
+        )
+        weights = np.where(bowl_mask, np.maximum(115.0 - gray, 0.0), 0.0)
+        weight_sum = float(weights.sum())
+        if int(bowl_mask.sum()) < max(20, int(100 * scale * scale)) or weight_sum <= 0.0:
+            return None
+        bowl_x = float((weights * xx).sum() / weight_sum)
+        bowl_y = float((weights * yy).sum() / weight_sum)
+        return (bowl_x, bowl_y), (cream_x, cream_y)
+
+    def _apply_collision_shield(self, obs: dict[str, np.ndarray], action: np.ndarray) -> np.ndarray:
+        step = self._episode_step
+        self._episode_step += 1
+        if COLLISION_SHIELD_DEBUG and ENABLE_COLLISION_SHIELD and step == COLLISION_SHIELD_START:
+            debug_image = np.asarray(obs.get("agentview_image"))
+            print(
+                f"[smolvla-shield] gate instruction={self.instruction!r} "
+                f"image_shape={debug_image.shape} range=({debug_image.min():.3f},{debug_image.max():.3f})",
+                flush=True,
+            )
+        if (
+            not ENABLE_COLLISION_SHIELD
+            or self.instruction != "put the bowl on the stove"
+            or step < COLLISION_SHIELD_START
+            or step > COLLISION_SHIELD_END
+        ):
+            return action
+        centers = self._estimate_stove_object_centers(obs.get("agentview_image"))
+        if centers is None:
+            return action
+        (bowl_x, _), (cream_x, _) = centers
+        image_width = np.asarray(obs["agentview_image"]).shape[-2 if np.asarray(obs["agentview_image"]).shape[0] == 3 else 1]
+        if cream_x - bowl_x < 20.0 * (image_width / 256.0):
+            return action
+        shielded = action.copy()
+        shielded[0] = np.clip(shielded[0] - COLLISION_SHIELD_GAIN, -1.0, 1.0)
+        if COLLISION_SHIELD_DEBUG and step in (COLLISION_SHIELD_START, 30, COLLISION_SHIELD_END):
+            print(
+                f"[smolvla-shield] step={step} bowl_x={bowl_x:.1f} cream_x={cream_x:.1f} "
+                f"action_x={action[0]:.3f}->{shielded[0]:.3f}", flush=True,
+            )
+        return shielded
 
     def _predict_action_chunk(self, obs: dict[str, np.ndarray]) -> torch.Tensor:
         """観測から (1, T, 7) の action chunk を推論する（postprocess 済み）。"""
@@ -771,7 +862,7 @@ class SmolVLAMyPolicy(BasePolicy):
             action = np.asarray(action, dtype=np.float32).reshape(-1)
             if action.shape != (7,):
                 raise ValueError(f"Expected action shape (7,), got {action.shape}")
-            return action
+            return self._apply_collision_shield(obs, action)
 
         # 新 chunk 生成直前かどうか（queue 空 = 次の select_action で推論が走る）
         new_chunk = len(self.policy._queues[ACTION]) == 0
@@ -799,7 +890,7 @@ class SmolVLAMyPolicy(BasePolicy):
         action = _scale_action_motion(action, scale)
         self._steps_into_chunk += 1
 
-        return action
+        return self._apply_collision_shield(obs, action)
 
 
 # policy_server.py への組み込み例:
