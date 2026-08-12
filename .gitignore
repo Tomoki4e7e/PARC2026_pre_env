@@ -7,6 +7,9 @@ LIBERO-plus/
 assets.zip
 submission.zip
 
+# Generated PARC submission archives (GitHub 100MB limit)
+parc2026_submission/*.zip
+
 # Large model weights (GitHub 100MB limit; copy via bundle_submission.sh)
 **/model.safetensors
 

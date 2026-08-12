@@ -113,6 +113,11 @@ def main() -> None:
         help="table/light replay低LR LoRA出力をマージする",
     )
     parser.add_argument(
+        "--reward-weighted-bc",
+        action="store_true",
+        help="報酬重み付きBC LoRA出力をマージする",
+    )
+    parser.add_argument(
         "--stove-collision",
         action="store_true",
         help="非衝突stove replay重点LoRA出力をマージする",
@@ -153,6 +158,7 @@ def main() -> None:
             args.track1_stage2,
             args.augmentation,
             args.perturbation_replay,
+            args.reward_weighted_bc,
             args.stove_collision,
             args.phase3,
             args.phase4,
@@ -161,7 +167,7 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --stove-collision / "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --reward-weighted-bc / --stove-collision / "
             "--phase3 / --phase4 / --phase5 "
             "は同時に指定できません"
         )
@@ -170,6 +176,8 @@ def main() -> None:
         config.apply_stove_collision_config()
     elif args.perturbation_replay:
         config.apply_perturbation_replay_config()
+    elif args.reward_weighted_bc:
+        config.apply_reward_weighted_bc_config()
     elif args.phase5:
         config.apply_phase5_config()
     elif args.phase4:

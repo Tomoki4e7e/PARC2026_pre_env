@@ -92,6 +92,20 @@ class EvalConfig:
 
     device: str = "cpu"
     seed: int = 42
+    # Local evaluation/collection can reserve disjoint init-state ordinals.
+    # The official/default evaluation remains offset zero.
+    init_state_offset: int = 0
+
+    # Local simulator data collection only.  Organizer-hosted evaluation
+    # observations must never be recorded or used for training.
+    rl_record_dir: Path | None = None
+    allow_local_data_recording: bool = False
+
+    # Local rollout visualization. Frames are streamed directly to MP4.
+    video_dir: Path | None = None
+    video_fps: float = 20.0
+    video_frame_skip: int = 1
+    video_camera: str = "agent"
 
 
 @dataclass

@@ -12,6 +12,7 @@ submission_template/policy_server.py の MyPolicy クラスを、この内容で
 from __future__ import annotations
 
 import json
+import hashlib
 import math
 import os
 import re
@@ -709,8 +710,72 @@ class SmolVLAMyPolicy(BasePolicy):
                 flush=True,
             )
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        weights_path = model_path / "model.safetensors"
+        if not weights_path.is_file():
+            raise FileNotFoundError(f"Model weights not found: {weights_path}")
+        digest = hashlib.sha256()
+        with weights_path.open("rb") as weights_file:
+            for block in iter(lambda: weights_file.read(8 * 1024 * 1024), b""):
+                digest.update(block)
+        self.model_sha256 = digest.hexdigest()
+        self.model_path = str(model_path.resolve())
+        print(
+            f"[smolvla] model_path={self.model_path} "
+            f"model_sha256={self.model_sha256} device={self.device}",
+            flush=True,
+        )
         self.policy = SmolVLAPolicy.from_pretrained(str(model_path)).to(self.device)
         self.policy.eval()
+
+        self._residual_policy = None
+        # The bundled residual passed the deployment gate and is enabled when its
+        # weights are present.  PARC_RESIDUAL_POLICY=0 remains an explicit opt-out.
+        residual_setting = os.environ.get("PARC_RESIDUAL_POLICY", "auto").strip().lower()
+        residual_dir = Path(
+            os.environ.get(
+                "PARC_RESIDUAL_MODEL_DIR", str(model_path.parent / "residual_policy")
+            )
+        )
+        if residual_setting not in ("", "0", "false", "no", "off"):
+            weights_exist = (residual_dir / "config.json").is_file() and (
+                residual_dir / "model.safetensors"
+            ).is_file()
+            if weights_exist:
+                from residual_policy import ResidualActionPolicy
+
+                manifest_path = residual_dir / "training_manifest.json"
+                if manifest_path.is_file():
+                    manifest = json.loads(manifest_path.read_text())
+                    trained_base = manifest.get("base_model_sha256")
+                    if trained_base and trained_base != self.model_sha256:
+                        raise RuntimeError(
+                            "Residual policy base-model mismatch: "
+                            f"trained={trained_base}, loaded={self.model_sha256}"
+                        )
+
+                self._residual_policy = ResidualActionPolicy(residual_dir, self.device)
+                print(f"[smolvla] residual policy enabled: {residual_dir}", flush=True)
+            elif residual_setting not in ("", "auto"):
+                raise FileNotFoundError(f"residual policy weights not found: {residual_dir}")
+
+        self._collision_critic = None
+        critic_setting = os.environ.get("PARC_COLLISION_CRITIC", "off").strip().lower()
+        critic_dir = Path(
+            os.environ.get(
+                "PARC_COLLISION_CRITIC_DIR", str(model_path.parent / "collision_critic")
+            )
+        )
+        if critic_setting not in ("", "0", "false", "no", "off"):
+            weights_exist = (critic_dir / "config.json").is_file() and (
+                critic_dir / "model.safetensors"
+            ).is_file()
+            if weights_exist:
+                from collision_critic import CollisionCritic
+
+                self._collision_critic = CollisionCritic(critic_dir, self.device)
+                print(f"[smolvla] collision critic enabled: {critic_dir}", flush=True)
+            elif critic_setting not in ("", "auto"):
+                raise FileNotFoundError(f"collision critic weights not found: {critic_dir}")
 
         self.preprocess, self.postprocess = _load_pre_post_processors(
             str(model_path), str(self.device)
@@ -734,7 +799,7 @@ class SmolVLAMyPolicy(BasePolicy):
                 flush=True,
             )
 
-    def reset(self, instruction: str = "") -> None:
+    def reset(self, instruction: str = "", seed: int | None = None) -> None:
         self.instruction = _normalize_instruction(instruction)
         self._steps_into_chunk = 0
         self._te_steps_since_infer = 0
@@ -742,6 +807,54 @@ class SmolVLAMyPolicy(BasePolicy):
         self.policy.reset()
         if self._temporal_ensembler is not None:
             self._temporal_ensembler.reset()
+        self.last_base_action = None
+        self.last_residual = None
+        self.last_collision_risk = None
+        self.last_base_collision_risk = None
+        self.last_collision_fallback = False
+
+    def _apply_residual_after_ensemble(
+        self, obs: dict[str, np.ndarray], base_action: np.ndarray
+    ) -> np.ndarray:
+        """Apply the learned residual after temporal ensemble, before safety shield."""
+        base_action = np.asarray(base_action, dtype=np.float32).copy()
+        self.last_base_action = base_action.copy()
+        self.last_residual = np.zeros(6, dtype=np.float32)
+        self.last_collision_risk = None
+        self.last_base_collision_risk = None
+        self.last_collision_fallback = False
+        action = base_action
+        if self._residual_policy is not None:
+            state = np.concatenate(
+                [
+                    np.asarray(obs["robot0_eef_pos"], dtype=np.float32),
+                    _quat_to_axis_angle(obs["robot0_eef_quat"]),
+                    np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32),
+                ]
+            )
+            action, self.last_residual = self._residual_policy.apply(state, base_action)
+            if (
+                self._collision_critic is not None
+                and self.instruction == "put the bowl on the stove"
+            ):
+                residual_risk, _ = self._collision_critic.risk(
+                    state, action, obs.get("agentview_image")
+                )
+                base_risk, _ = self._collision_critic.risk(
+                    state, base_action, obs.get("agentview_image")
+                )
+                threshold = float(
+                    os.environ.get(
+                        "PARC_COLLISION_CRITIC_THRESHOLD",
+                        str(self._collision_critic.config.threshold),
+                    )
+                )
+                self.last_collision_risk = residual_risk
+                self.last_base_collision_risk = base_risk
+                self.last_collision_fallback = residual_risk >= threshold
+                if self.last_collision_fallback:
+                    action = base_action.copy()
+        return self._apply_collision_shield(obs, action)
 
     @staticmethod
     def _estimate_stove_object_centers(image: np.ndarray) -> tuple[tuple[float, float], tuple[float, float]] | None:
@@ -862,7 +975,7 @@ class SmolVLAMyPolicy(BasePolicy):
             action = np.asarray(action, dtype=np.float32).reshape(-1)
             if action.shape != (7,):
                 raise ValueError(f"Expected action shape (7,), got {action.shape}")
-            return self._apply_collision_shield(obs, action)
+            return self._apply_residual_after_ensemble(obs, action)
 
         # 新 chunk 生成直前かどうか（queue 空 = 次の select_action で推論が走る）
         new_chunk = len(self.policy._queues[ACTION]) == 0
@@ -890,7 +1003,7 @@ class SmolVLAMyPolicy(BasePolicy):
         action = _scale_action_motion(action, scale)
         self._steps_into_chunk += 1
 
-        return self._apply_collision_shield(obs, action)
+        return self._apply_residual_after_ensemble(obs, action)
 
 
 # policy_server.py への組み込み例:

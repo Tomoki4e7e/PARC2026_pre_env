@@ -135,7 +135,8 @@ class EnvironmentManager:
         n_available = init_states.shape[0]
 
 
-        indices = np.arange(n_episodes) % n_available
+        offset = int(self.config.init_state_offset)
+        indices = (offset + np.arange(n_episodes)) % n_available
         sampled_states = init_states[indices].copy()
 
         if perturbation.robot_init_pos_noise > 0:

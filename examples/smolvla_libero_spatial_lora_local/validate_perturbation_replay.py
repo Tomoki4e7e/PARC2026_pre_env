@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -24,6 +25,64 @@ DATASET_ROOT = (SCRIPT_DIR / "work/lerobot_cache/hub/datasets--lerobot--libero_p
 DEFAULT_CSV = REPO_ROOT / "results/track1_distribution_audit/tasks.csv"
 RESULT_PATH = REPO_ROOT / "results/track1_perturbation_replay/summary.json"
 os.environ.setdefault("PARC_ENABLE_PROXY_SUITE", "1")
+
+
+def _safe_task_name(task_name: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in task_name)
+
+
+def _recover_worker_output(payload_path: Path, worker_output: Path) -> bool:
+    """Recover a result if an interrupted worker already committed its NPZ."""
+    if worker_output.is_file():
+        return True
+    payload = json.loads(payload_path.read_text(encoding="utf-8"))
+    record_dir = payload.get("rl_record_dir")
+    if not record_dir:
+        return False
+    ordinal = int(payload["init_ordinal"])
+    record_path = Path(record_dir) / (
+        f"{_safe_task_name(payload['task_id'])}__seed{ordinal}__ep{ordinal:03d}.npz"
+    )
+    if not record_path.is_file():
+        return False
+    with np.load(record_path, allow_pickle=False) as episode:
+        metadata = json.loads(str(episode["metadata_json"].item()))
+        steps = int(len(episode["action"]))
+        collision = np.asarray(episode["collision"], dtype=np.bool_)
+        terminated = np.asarray(episode["terminated"], dtype=np.bool_)
+    outcome = {
+        "done": bool(terminated[-1]) if len(terminated) else False,
+        "collided": bool(metadata["collided"]),
+        "accepted": bool(metadata["success"]),
+        "steps": steps,
+        "record_path": None,
+        "rl_record_path": str(record_path),
+        "max_non_target_displacement": None,
+        "first_collision": (
+            {"step": int(np.flatnonzero(collision)[0]) + 1, "recovered": True}
+            if np.any(collision) else None
+        ),
+        "diagnostic_positions": {},
+        "visual_domain": metadata.get("collection_context", {}).get("visual_domain"),
+        "recovered_from_rl_record": True,
+    }
+    worker_output.write_text(json.dumps(outcome), encoding="utf-8")
+    return True
+
+
+def _run_collection_job(job: dict, worker_env: dict[str, str]) -> dict:
+    """Run one isolated MuJoCo replay, resuming a completed worker output."""
+    worker_output = Path(job["worker_output"])
+    if _recover_worker_output(Path(job["payload_path"]), worker_output):
+        outcome = json.loads(worker_output.read_text(encoding="utf-8"))
+    else:
+        subprocess.run([
+            "/home/cm-pc/.venvs/parc2026-PARC2026_pre/bin/python",
+            str(Path(__file__).resolve()), "--worker-payload", job["payload_path"],
+            "--worker-output", job["worker_output"],
+        ], cwd=REPO_ROOT, env=worker_env, check=True)
+        outcome = json.loads(worker_output.read_text(encoding="utf-8"))
+    return {**job["metadata"], **outcome}
 
 
 def load_dataset_tables():
@@ -103,17 +162,33 @@ def quat_to_axis_angle(quat: np.ndarray) -> np.ndarray:
 
 
 def replay(
-    task_info, init_state: np.ndarray, actions: list[np.ndarray], record_path: Path | None = None
+    task_info,
+    init_state: np.ndarray,
+    actions: list[np.ndarray],
+    record_path: Path | None = None,
+    rl_record_dir: Path | None = None,
+    episode_id: int = 0,
+    visual_domain: dict | None = None,
+    camera_size: int = 256,
 ) -> dict:
     from pipeline.config import EvalConfig
     from pipeline.environment import EnvironmentManager
 
-    manager = EnvironmentManager(EvalConfig(camera_height=256, camera_width=256))
+    manager = EnvironmentManager(
+        EvalConfig(camera_height=camera_size, camera_width=camera_size)
+    )
     env = manager.create_env(task_info)
     try:
         env.reset()
         env.sim.set_state_from_flattened(init_state)
         env.sim.forward()
+        visual_manifest = None
+        if visual_domain is not None:
+            from domain_randomization import VisualDomainConfig, apply_visual_domain_randomization
+
+            visual_manifest = apply_visual_domain_randomization(
+                env, manager.get_obj_of_interest(task_info), VisualDomainConfig(**visual_domain)
+            )
         action_dim = env.robots[0].action_dim
         obs = None
         for _ in range(10):
@@ -140,6 +215,8 @@ def replay(
         done = False
         steps = 0
         front_images, wrist_images, states, recorded_actions = [], [], [], []
+        transition_obs, transition_next_obs = [], []
+        env_rewards, terminated, collision_flags = [], [], []
         for action in actions:
             front_images.append(np.asarray(obs["agentview_image"], dtype=np.uint8))
             wrist_images.append(np.asarray(obs["robot0_eye_in_hand_image"], dtype=np.uint8))
@@ -149,7 +226,11 @@ def replay(
                 np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32),
             ]))
             recorded_actions.append(np.asarray(action, dtype=np.float32))
-            obs, _, done, _ = env.step(np.asarray(action, dtype=np.float32))
+            if rl_record_dir is not None:
+                transition_obs.append(
+                    {key: np.asarray(value).copy() for key, value in obs.items()}
+                )
+            obs, reward, done, _ = env.step(np.asarray(action, dtype=np.float32))
             steps += 1
             for name, p0 in initial.items():
                 if name + "_pos" in obs:
@@ -159,6 +240,13 @@ def replay(
                         first_collision = {
                             "object": name, "step": steps, "displacement": displacement,
                         }
+            if rl_record_dir is not None:
+                transition_next_obs.append(
+                    {key: np.asarray(value).copy() for key, value in obs.items()}
+                )
+                env_rewards.append(float(reward))
+                terminated.append(bool(done))
+                collision_flags.append(any(value > 0.001 for value in max_disp.values()))
             if done:
                 break
         collided = any(value > 0.001 for value in max_disp.values())
@@ -172,12 +260,37 @@ def replay(
                 action=np.stack(recorded_actions).astype(np.float32),
                 task=np.asarray(task_info.language), task_id=np.asarray(task_info.name),
             )
+        rl_path = None
+        if rl_record_dir is not None:
+            from pipeline.rl_data import save_rl_episode
+
+            rl_path = save_rl_episode(
+                rl_record_dir,
+                task_name=task_info.name,
+                instruction=task_info.language,
+                benchmark=task_info.benchmark_name,
+                episode_id=episode_id,
+                seed=episode_id,
+                observations=transition_obs,
+                next_observations=transition_next_obs,
+                actions=recorded_actions,
+                env_rewards=env_rewards,
+                terminated=terminated,
+                truncated=[False] * max(0, len(terminated) - 1)
+                + ([not bool(done)] if terminated else []),
+                collision_flags=collision_flags,
+                success=accepted,
+                collision_threshold_m=0.001,
+                collection_context={"visual_domain": visual_manifest},
+            )
         return {"done": bool(done), "collided": collided,
                 "accepted": accepted, "steps": steps,
                 "record_path": str(record_path) if accepted and record_path else None,
+                "rl_record_path": str(rl_path) if rl_path else None,
                 "max_non_target_displacement": max(max_disp.values(), default=0.0),
                 "first_collision": first_collision,
-                "diagnostic_positions": diagnostic_positions}
+                "diagnostic_positions": diagnostic_positions,
+                "visual_domain": visual_manifest}
     finally:
         env.close()
 
@@ -191,8 +304,17 @@ def main() -> None:
     parser.add_argument("--episode-ordinals", default="")
     parser.add_argument("--output", type=Path, default=RESULT_PATH)
     parser.add_argument("--record-dir", type=Path)
+    parser.add_argument("--rl-record-dir", type=Path)
+    parser.add_argument("--confirm-local-generated-data", action="store_true")
     parser.add_argument("--dataset-root", type=Path)
     parser.add_argument("--build-dataset", action="store_true")
+    parser.add_argument("--visual-domain-mode",
+                        choices=["none", "bright", "dark", "mixed"], default="none")
+    parser.add_argument("--visual-variants", type=int, default=1)
+    parser.add_argument("--visual-seed", type=int, default=2026)
+    parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument("--max-new-jobs", type=int)
+    parser.add_argument("--camera-size", type=int, default=256)
     parser.add_argument("--worker-payload", type=Path)
     parser.add_argument("--worker-output", type=Path)
     args = parser.parse_args()
@@ -208,11 +330,33 @@ def main() -> None:
             info, PerturbationConfig(), payload["init_ordinal"] + 1
         )
         record_path = Path(payload["record_path"]) if payload.get("record_path") else None
+        rl_record_dir = (
+            Path(payload["rl_record_dir"]) if payload.get("rl_record_dir") else None
+        )
         outcome = replay(
-            info, states[payload["init_ordinal"]], payload["actions"], record_path
+            info,
+            states[payload["init_ordinal"]],
+            payload["actions"],
+            record_path,
+            rl_record_dir=rl_record_dir,
+            episode_id=payload["init_ordinal"],
+            visual_domain=payload.get("visual_domain"),
+            camera_size=int(payload.get("camera_size", 256)),
         )
         args.worker_output.write_text(json.dumps(outcome), encoding="utf-8")
         return
+    if args.rl_record_dir is not None and not args.confirm_local_generated_data:
+        parser.error("--rl-record-dir requires --confirm-local-generated-data")
+    if args.visual_variants < 1:
+        parser.error("--visual-variants must be >= 1")
+    if args.visual_domain_mode == "none" and args.visual_variants != 1:
+        parser.error("--visual-variants > 1 requires a non-none --visual-domain-mode")
+    if args.workers < 1:
+        parser.error("--workers must be >= 1")
+    if args.max_new_jobs is not None and args.max_new_jobs < 1:
+        parser.error("--max-new-jobs must be >= 1")
+    if args.camera_size < 64:
+        parser.error("--camera-size must be >= 64")
     os.environ["PARC_PROXY_TASKS_CSV"] = str(args.tasks_csv.resolve())
 
     with args.tasks_csv.open(newline="", encoding="utf-8") as handle:
@@ -234,7 +378,7 @@ def main() -> None:
     tasks_meta, episodes_meta, frames = load_dataset_tables()
     task_index = {name.replace(" ", "_"): int(row.task_index)
                   for name, row in tasks_meta.iterrows()}
-    results = []
+    jobs = []
     for row in selected:
         base = row["base_task"]
         source_index = task_index[base]
@@ -254,35 +398,90 @@ def main() -> None:
             episode_id = source_episode_ids[ordinal]
             episode_frames = frames[frames.episode_index == episode_id].sort_values("frame_index")
             args.output.parent.mkdir(parents=True, exist_ok=True)
-            payload_path = args.output.parent / "worker_payload.json"
-            worker_output = args.output.parent / "worker_output.json"
-            payload_path.write_text(json.dumps({
-                "tasks_csv": str(args.tasks_csv.resolve()),
-                "task_id": row["task_id"],
-                "init_ordinal": ordinal,
-                "actions": [np.asarray(action).tolist() for action in episode_frames.action],
-                "record_path": str(
-                    args.record_dir / f'{row["task_id"]}__ep{ordinal:03d}.npz'
-                ) if args.record_dir else None,
-            }), encoding="utf-8")
-            worker_env = os.environ.copy()
-            worker_env["PYTHONPATH"] = (
-                f"{REPO_ROOT / 'LIBERO-plus'}:{REPO_ROOT}:{REPO_ROOT / 'compe'}"
+            for visual_index in range(args.visual_variants):
+                visual_domain = None
+                visual_tag = ""
+                if args.visual_domain_mode != "none":
+                    visual_domain = {
+                        "mode": args.visual_domain_mode,
+                        "seed": args.visual_seed + len(jobs),
+                    }
+                    visual_tag = f"__vis{visual_index:02d}_{args.visual_domain_mode}"
+                collection_index = len(jobs)
+                payload_path = args.output.parent / f"worker_payload_{collection_index:04d}.json"
+                worker_output = args.output.parent / f"worker_output_{collection_index:04d}.json"
+                payload_path.write_text(json.dumps({
+                    "tasks_csv": str(args.tasks_csv.resolve()),
+                    "task_id": row["task_id"],
+                    "init_ordinal": ordinal,
+                    "actions": [np.asarray(action).tolist() for action in episode_frames.action],
+                    "record_path": str(
+                        args.record_dir / f'{row["task_id"]}__ep{ordinal:03d}{visual_tag}.npz'
+                    ) if args.record_dir else None,
+                    "rl_record_dir": str(
+                        args.rl_record_dir
+                        / f'{row["task_id"]}__ep{ordinal:03d}{visual_tag}'
+                    ) if args.rl_record_dir else None,
+                    "visual_domain": visual_domain,
+                    "camera_size": args.camera_size,
+                }), encoding="utf-8")
+                jobs.append({
+                    "payload_path": str(payload_path),
+                    "worker_output": str(worker_output),
+                    "metadata": {
+                        **row,
+                        "collection_index": collection_index,
+                        "source_episode": episode_id,
+                        "init_ordinal": ordinal,
+                        "visual_index": visual_index,
+                    },
+                })
+
+    worker_env = os.environ.copy()
+    worker_env["PYTHONPATH"] = (
+        f"{REPO_ROOT / 'LIBERO-plus'}:{REPO_ROOT}:{REPO_ROOT / 'compe'}"
+    )
+    pending_jobs = []
+    for job in jobs:
+        if not _recover_worker_output(Path(job["payload_path"]), Path(job["worker_output"])):
+            pending_jobs.append(job)
+    if args.max_new_jobs is not None:
+        pending_jobs = pending_jobs[:args.max_new_jobs]
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        pending = [executor.submit(_run_collection_job, job, worker_env) for job in pending_jobs]
+        for completed, future in enumerate(as_completed(pending), start=1):
+            outcome = future.result()
+            print(
+                f"[collect] {completed}/{len(pending_jobs)} index={outcome['collection_index']} "
+                f"task={outcome['task_id']} accepted={outcome['accepted']} "
+                f"collision={outcome['collided']}",
+                flush=True,
             )
-            subprocess.run([
-                "/home/cm-pc/.venvs/parc2026-PARC2026_pre/bin/python",
-                str(Path(__file__).resolve()), "--worker-payload", str(payload_path),
-                "--worker-output", str(worker_output),
-            ], cwd=REPO_ROOT, env=worker_env, check=True)
-            outcome = json.loads(worker_output.read_text(encoding="utf-8"))
-            results.append({**row, "source_episode": episode_id, "init_ordinal": ordinal, **outcome})
-            print(row["task_id"], ordinal, outcome, flush=True)
+    results = []
+    for job in jobs:
+        worker_output = Path(job["worker_output"])
+        if worker_output.is_file():
+            results.append({
+                **job["metadata"],
+                **json.loads(worker_output.read_text(encoding="utf-8")),
+            })
+    results.sort(key=lambda item: item["collection_index"])
+
+    if len(results) < len(jobs):
+        progress_path = args.output.parent / "progress.json"
+        progress_path.write_text(json.dumps({
+            "completed": len(results), "total": len(jobs),
+            "remaining": len(jobs) - len(results),
+        }, indent=2), encoding="utf-8")
+        print(f"progress: {len(results)}/{len(jobs)}; rerun the same command")
+        return
 
     report = {
         "protocol": {
             **{key: value for key, value in vars(args).items() if not isinstance(value, Path)},
             "tasks_csv": str(args.tasks_csv), "output": str(args.output),
             "record_dir": str(args.record_dir) if args.record_dir else None,
+            "rl_record_dir": str(args.rl_record_dir) if args.rl_record_dir else None,
             "dataset_root": str(args.dataset_root) if args.dataset_root else None,
         },
         "n_replays": len(results),

@@ -374,6 +374,11 @@ def main() -> None:
         help="table/light 実レンダリング50:50 replayの低LR LoRA",
     )
     parser.add_argument(
+        "--reward-weighted-bc",
+        action="store_true",
+        help="ローカルRLログから構築した報酬重み付きBCデータで低LR LoRA",
+    )
+    parser.add_argument(
         "--stove-collision",
         action="store_true",
         help="非衝突stove replay重点配分の低LR LoRA",
@@ -408,6 +413,7 @@ def main() -> None:
             args.track1_stage2,
             args.augmentation,
             args.perturbation_replay,
+            args.reward_weighted_bc,
             args.stove_collision,
             args.phase3,
             args.phase4,
@@ -417,7 +423,7 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --stove-collision / "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --reward-weighted-bc / --stove-collision / "
             "--phase3 / --phase4 / --phase5 / "
             "--spatial-only は同時に指定できません"
         )
@@ -461,10 +467,13 @@ def main() -> None:
 
     sys.path.insert(0, str(lerobot_src))
 
-    if args.perturbation_replay or args.stove_collision:
+    if args.perturbation_replay or args.reward_weighted_bc or args.stove_collision:
         if args.stove_collision:
             config.apply_stove_collision_config()
             job_name = "smolvla_stove_collision_safe_lora"
+        elif args.reward_weighted_bc:
+            config.apply_reward_weighted_bc_config()
+            job_name = "smolvla_reward_weighted_bc_lora"
         else:
             config.apply_perturbation_replay_config()
             job_name = "smolvla_track1_perturbation_replay_lora"
@@ -536,7 +545,7 @@ def main() -> None:
     if args.quality_cache is not None:
         config.QUALITY_CACHE_PATH = args.quality_cache
 
-    if not args.phase4 and not args.perturbation_replay and not args.stove_collision:
+    if not args.phase4 and not args.perturbation_replay and not args.reward_weighted_bc and not args.stove_collision:
         episode_indices, selected_by_task = select_training_episodes(
             config.DATASET_REPO,
             config.DATASET_REVISION,
@@ -570,6 +579,8 @@ def main() -> None:
         merge_cmd = [sys.executable, str(merge_script)]
         if args.stove_collision:
             merge_cmd.append("--stove-collision")
+        elif args.reward_weighted_bc:
+            merge_cmd.append("--reward-weighted-bc")
         elif args.perturbation_replay:
             merge_cmd.append("--perturbation-replay")
         elif args.phase5:

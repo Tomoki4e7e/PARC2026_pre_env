@@ -136,7 +136,17 @@ def set_policy(policy: BasePolicy) -> None:
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    result = {"status": "ok"}
+    impl = getattr(_policy, "_impl", None)
+    if impl is not None:
+        result.update({
+            "policy": type(impl).__name__,
+            "model_path": getattr(impl, "model_path", None),
+            "model_sha256": getattr(impl, "model_sha256", None),
+            "residual_enabled": getattr(impl, "_residual_policy", None) is not None,
+            "collision_critic_enabled": getattr(impl, "_collision_critic", None) is not None,
+        })
+    return result
 
 
 @app.post("/reset")

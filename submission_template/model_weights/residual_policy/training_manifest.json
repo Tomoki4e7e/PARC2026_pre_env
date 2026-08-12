@@ -1,0 +1,17 @@
+{
+  "method": "reward_weighted_behavior_cloning_residual_initializer",
+  "base_policy_frozen": true,
+  "episodes": 591,
+  "transitions": 39978,
+  "steps": 5000,
+  "temperature": 10.0,
+  "seed": 42,
+  "input_dirs": [
+    "examples/smolvla_libero_spatial_lora_local/work/rl_gate_540_deployed",
+    "examples/smolvla_libero_spatial_lora_local/work/rl_base_deployed_111/rl_independent_visual",
+    "examples/smolvla_libero_spatial_lora_local/work/rl_base_deployed_111/rl_collision_unsafe_visual",
+    "examples/smolvla_libero_spatial_lora_local/work/rl_base_deployed_111/rl_collision_safe_visual"
+  ],
+  "base_model_dir": "examples/smolvla_libero_spatial_lora_local/work/smolvla_track1_perturbation_replay_merged",
+  "base_model_sha256": "8c8a26a45457b2b36214c6299c12c9af30117af7471bbf6ff073ad738df07098"
+}

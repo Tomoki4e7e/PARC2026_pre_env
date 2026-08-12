@@ -27,12 +27,14 @@ class TaskScore:
     task_name: str
     success_rate: float
     metrics: list[MetricResult]
+    episodes: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "task_name": self.task_name,
             "success_rate": self.success_rate,
             "metrics": {m.name: m.value for m in self.metrics},
+            "episodes": self.episodes,
         }
 
 
@@ -88,6 +90,16 @@ class Scorer:
             task_name=task_result.task_info.name,
             success_rate=success_rate,
             metrics=metrics,
+            episodes=[
+                {
+                    "episode_id": ep.episode_id,
+                    "success": ep.success,
+                    "collided": ep.collided,
+                    "total_steps": ep.total_steps,
+                    "video": ep.video_path,
+                }
+                for ep in task_result.episodes
+            ],
         )
 
     def score_track(
@@ -261,5 +273,4 @@ _METRIC_DESCRIPTIONS: dict[str, str] = {
     "sparc": "SPARC（軌道の滑らかさ。0 に近いほど滑らか）",
     "collision_rate": "衝突が発生したエピソードの割合",
 }
-
 

@@ -51,12 +51,14 @@ rm -f "$OUTPUT"
     zip -r "$OUTPUT" \
         policy_server.py \
         smolvla_mypolicy.py \
+        residual_policy.py \
+        collision_critic.py \
         instruction_aliases.py \
         lerobot_bootstrap.py \
         requirements.txt \
         vendor/ \
         model_weights/ \
-        -x '*/__pycache__/*' -x '*.pyc'
+        -x '*/__pycache__/*' -x '*.pyc' -x '*/.fuse_hidden*'
 )
 
 echo "[bundle] 完了: $(du -h "$OUTPUT" | cut -f1)  $OUTPUT"

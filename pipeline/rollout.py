@@ -9,6 +9,8 @@ import numpy as np
 from .config import EvalConfig, PerturbationConfig
 from .environment import EnvironmentManager, TaskInfo
 from .total_score import load_scoring_config
+from .rl_data import save_rl_episode
+from .video import EpisodeVideoRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ class EpisodeResult:
 
 
     collided: bool = False
+    video_path: str | None = None
 
     @property
     def trajectory(self) -> list[np.ndarray]:
@@ -86,6 +89,11 @@ class RolloutExecutor:
 
 
         self.scoring_config = scoring_config or load_scoring_config()
+        if self.config.rl_record_dir is not None and not self.config.allow_local_data_recording:
+            raise ValueError(
+                "rl_record_dir requires allow_local_data_recording=True; "
+                "organizer evaluation observations must not be recorded"
+            )
 
     def evaluate_task(
         self,
@@ -161,6 +169,13 @@ class RolloutExecutor:
         gripper_qpos_log: list[np.ndarray] = []
         actions_log: list[np.ndarray] = []
         rewards_log: list[float] = []
+        record_rl = self.config.rl_record_dir is not None
+        observations_log: list[dict[str, np.ndarray]] = []
+        next_observations_log: list[dict[str, np.ndarray]] = []
+        terminated_log: list[bool] = []
+        truncated_log: list[bool] = []
+        collision_flags_log: list[bool] = []
+        base_actions_log: list[np.ndarray] = []
 
         cc = self.scoring_config.get("collision", {})
         collision_enabled = bool(cc.get("enabled", True))
@@ -180,6 +195,15 @@ class RolloutExecutor:
         # SmolVLA / LIBERO 学習条件に合わせて相対アクション（OSC delta）を使用
         for robot in env.robots:
             robot.controller.use_delta = True
+
+        video = None
+        if self.config.video_dir is not None:
+            video = EpisodeVideoRecorder(
+                self.config.video_dir, task_info.name, episode_id,
+                task_info.language, self.config.video_camera,
+                self.config.video_fps, self.config.video_frame_skip,
+            )
+            video.add(obs, 0, force=True)
 
 
         object_init_pos: dict[str, np.ndarray] = {}
@@ -212,12 +236,21 @@ class RolloutExecutor:
 
 
             action = policy.get_action(obs_for_policy)
+            if record_rl:
+                observations_log.append(
+                    {key: np.asarray(value).copy() for key, value in obs_for_policy.items()}
+                )
+                base_action = getattr(policy, "last_base_action", None)
+                if base_action is not None:
+                    base_actions_log.append(np.asarray(base_action, dtype=np.float32).copy())
 
 
             action = self.env_manager.apply_action_noise(action, perturbation)
 
 
             obs, reward, done, info = env.step(action)
+            if video is not None:
+                video.add(obs, step + 1)
 
 
             joint_positions.append(obs.get("robot0_joint_pos", np.zeros(7)).copy())
@@ -250,6 +283,18 @@ class RolloutExecutor:
                                 d,
                             )
 
+            if record_rl:
+                next_observations_log.append(
+                    {key: np.asarray(value).copy() for key, value in obs.items()}
+                )
+                collision_flags_log.append(
+                    any(d > collision_threshold for d in object_max_disp.values())
+                )
+                terminated_log.append(bool(done))
+                truncated_log.append(
+                    not bool(done) and step + 1 >= self.config.max_steps_per_episode
+                )
+
             total_steps = step + 1
 
             if total_steps % 50 == 0:
@@ -267,6 +312,37 @@ class RolloutExecutor:
 
         collided = any(d > collision_threshold for d in object_max_disp.values())
         success = bool(done) and not collided
+        video_path = None
+        if video is not None:
+            saved_video = video.close(total_steps, success, collided)
+            if saved_video is not None:
+                video_path = str(saved_video.resolve())
+                logger.info("  rollout video saved: %s", video_path)
+
+        if record_rl:
+            record_path = save_rl_episode(
+                self.config.rl_record_dir,
+                task_name=task_info.name,
+                instruction=task_info.language,
+                benchmark=task_info.benchmark_name,
+                episode_id=episode_id,
+                seed=episode_seed,
+                observations=observations_log,
+                next_observations=next_observations_log,
+                actions=actions_log,
+                env_rewards=rewards_log,
+                terminated=terminated_log,
+                truncated=truncated_log,
+                collision_flags=collision_flags_log,
+                success=success,
+                collision_threshold_m=collision_threshold,
+                base_actions=base_actions_log if len(base_actions_log) == len(actions_log) else None,
+                collection_context={
+                    "init_state_ordinal": int(self.config.init_state_offset + episode_id),
+                    "init_state_offset": int(self.config.init_state_offset),
+                },
+            )
+            logger.info("  RL transition saved: %s", record_path)
 
         return EpisodeResult(
             task_name=task_info.name,
@@ -281,6 +357,7 @@ class RolloutExecutor:
             actions=actions_log,
             rewards=rewards_log,
             collided=collided,
+            video_path=video_path,
         )
 
     def evaluate_tasks(

@@ -23,7 +23,7 @@
         "padding_side": "right",
         "padding": "max_length",
         "truncation": true,
-        "tokenizer_name": "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
+        "tokenizer_name": "model_weights/smolvla_spatial_lora/vlm_processor"
       }
     },
     {

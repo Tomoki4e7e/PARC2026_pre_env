@@ -117,6 +117,83 @@ source env.sh
 python -m pipeline --server-url http://localhost:8000 --track track1 --n-episodes 2
 ```
 
+### ローカルRLデータ収集・残差ポリシー
+
+運営評価の観測は保存・後続学習に利用できない。以下は、自分で実行するローカル
+LIBEROシミュレータの生成データだけを対象とする。
+
+完全な遷移（両カメラ、state、action、reward、next state、終了、1mm衝突）を保存:
+
+```bash
+python -m pipeline --server-url http://localhost:8000 --track track1 \
+  --n-episodes 2 --local-rl-record-dir work/rl_rollouts \
+  --allow-local-data-recording
+```
+
+既存のローカルNPZ行動を再生し、成功・失敗の両方を再ラベル:
+
+```bash
+python examples/smolvla_libero_spatial_lora_local/relabel_existing_rollouts.py \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/perturbation_replay_records \
+  --output-dir examples/smolvla_libero_spatial_lora_local/work/rl_relabeled \
+  --confirm-local-generated-data
+```
+
+明暗、背景/非対象物色、カメラの小摂動を加えた実レンダリング収集:
+
+```bash
+python examples/smolvla_libero_spatial_lora_local/validate_perturbation_replay.py \
+  --visual-domain-mode mixed --visual-variants 3 \
+  --variants-per-group 2 --episodes-per-variant 3 \
+  --record-dir examples/smolvla_libero_spatial_lora_local/work/visual_records \
+  --rl-record-dir examples/smolvla_libero_spatial_lora_local/work/visual_rl \
+  --confirm-local-generated-data
+```
+
+報酬重み付きBC用データを構築して低LR LoRA学習:
+
+```bash
+python examples/smolvla_libero_spatial_lora_local/build_reward_weighted_bc_dataset.py \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/rl_relabeled \
+  --output-root examples/smolvla_libero_spatial_lora_local/work/datasets/libero_reward_weighted_bc \
+  --confirm-local-generated-data
+python examples/smolvla_libero_spatial_lora_local/train.py --reward-weighted-bc
+```
+
+残差学習では、まず凍結SmolVLAのbase actionを付与し、報酬重み付き初期化を行う:
+
+```bash
+python examples/smolvla_libero_spatial_lora_local/annotate_base_actions.py \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/rl_relabeled \
+  --output-dir examples/smolvla_libero_spatial_lora_local/work/rl_with_base \
+  --model-dir examples/smolvla_libero_spatial_lora_local/work/smolvla_libero_aug_checkpoint_selected_merged \
+  --confirm-local-generated-data
+
+# 実軌道のstrict prefixをtruncated失敗として再ラベルし、開始ゲート量へ展開
+python examples/smolvla_libero_spatial_lora_local/expand_rl_start_gate.py \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/rl_with_base \
+  --output-dir examples/smolvla_libero_spatial_lora_local/work/rl_start_gate \
+  --prefixes-per-episode 8 \
+  --confirm-local-generated-data
+python examples/smolvla_libero_spatial_lora_local/train_residual_policy.py \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/rl_with_base \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/rl_additional_with_base \
+  --base-model-dir examples/smolvla_libero_spatial_lora_local/work/smolvla_track1_perturbation_replay_merged \
+  --output-dir submission_template/model_weights/residual_policy
+```
+
+`expand_rl_start_gate.py` の失敗例は新しい独立ロールアウトではなく、実軌道の
+途中prefixである。IQL/CQLの開始ゲートには使えるが、独立した初期状態・衝突例・
+実レンダリング外観の収集を置き換えるものではない。
+
+IQL/CQLへ進む前にデータ量・失敗例・行動分散を確認する:
+
+```bash
+python examples/smolvla_libero_spatial_lora_local/audit_offline_rl_dataset.py \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/rl_with_base \
+  --input-dir examples/smolvla_libero_spatial_lora_local/work/rl_additional_with_base
+```
+
 提出前チェック:
 
 ```bash

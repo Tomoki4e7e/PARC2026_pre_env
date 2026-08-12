@@ -63,8 +63,16 @@ docker run --rm -v $PWD/my_submission.zip:/sub.zip parc2026 \
 #    ランダム action を返すので、まずそのまま起動して疎通確認できる）
 python submission_template/policy_server.py --port 8000
 
+# 別ターミナルで、正しいモデルと補助ポリシー状態を確認
+curl http://127.0.0.1:8000/health
+
 # 2) 評価を実行する
 python -m pipeline --server-url http://localhost:8000 --track track1 --n-episodes 2 --max-steps 600
+
+# SmolVLAが返したactionによる実rolloutを動画保存（別ターミナルで上記サーバーを起動）
+python -m pipeline --server-url http://localhost:8000 --track track1 \
+  --n-episodes 1 --max-tasks 1 --max-steps 300 \
+  --video-dir results/smolvla_videos --video-camera both --video-frame-skip 2
 
 # タスクを指定して評価する（example タスク名を指定する。存在しない名前は候補一覧つきでエラーとなる）
 python -m pipeline --server-url http://localhost:8000 --track track1 --tasks <task_id>
@@ -72,6 +80,55 @@ python -m pipeline --server-url http://localhost:8000 --track track1 --tasks <ta
 # 提出 zip をエンドツーエンドで検証する（zip 展開 → 依存インストール → 評価まで自動実行）
 python evaluate.py my_submission.zip --n-episodes 2
 ```
+
+SmolVLAサーバーは既定で選定済みstage2モデル単体を使用する。起動ログと `/health` に
+モデルの絶対パス・SHA-256・補助ポリシーの有効状態が表示される。実験中の残差ポリシーは
+暗黙には有効にならず、比較実験で明示的に使う場合のみ `PARC_RESIDUAL_POLICY=1` を指定する。
+
+### シミュレータ上のロボット動作を映像で確認する
+
+ポリシーサーバーや学習済みモデルを起動せず、LIBEROのタスクをMuJoCoで読み込み、
+安全なテスト動作をMP4に記録できる。GUIのない環境でも実行可能である。
+
+```bash
+source env.sh
+python visualize_simulation.py
+# 前方・手首カメラを並べて記録する場合
+python visualize_simulation.py --camera both --output results/simulation_both.mp4
+```
+
+出力は既定で `results/simulation_demo.mp4`。`--task-id 0`〜`3`、`--steps`、
+`--fps`、`--size` も指定できる。動画を開けば、Franka PandaアームがMuJoCoの物理計算下で
+上下・左右・前後に動き、グリッパーを開閉する様子を確認できる。
+
+成功・失敗の多様なパターンを軽量に比較する場合は次を実行する。
+
+```bash
+python validate_simulation_patterns.py
+# 必要なケースだけ、さらに低負荷で確認する例
+python validate_simulation_patterns.py \
+  --scenarios success drop_early collision --size 128 --frame-skip 5
+```
+
+`results/pattern_validation/` に各ケースのMP4と `manifest.json` が出力される。
+既定ケースは、実ゴールを達成する `success`、把持しない `no_grasp`、搬送前に落とす
+`drop_early`、誤った場所へ運ぶ `wrong_target`、別物体へ接触する `collision` の5種類。
+`manifest.json` にはLIBEROの実ゴール判定、期待結果との一致、物体移動量、1 mmを超えた
+副次的物体の変位が記録される。`--frame-skip` は物理計算を維持したまま動画エンコード量を減らす。
+
+4種類の失敗を、それぞれ3バリアントずつ比較する場合は `--matrix` を使用する。
+
+```bash
+python validate_simulation_patterns.py --matrix --size 128 --frame-skip 5 \
+  --output-dir results/failure_matrix
+```
+
+- `no_grasp`: 開いたまま通過、上空で停止、横にずれて把持
+- `drop_early`: 持ち上げ直後、中間地点、目標付近で落下
+- `wrong_target`: 目標の左、右、別の物体の位置へ搬送
+- `collision`: milk、butter、orange juiceの各物体へ接触
+
+個別のバリアント名を `--scenarios` に指定して任意の組み合わせだけを比較することもできる。
 
 結果は `results/<submission_id>.json` に出力される。成功率、ステップ数、軌道メトリクス
 （経路長、jerk、SPARC 等）の詳細が含まれる。
