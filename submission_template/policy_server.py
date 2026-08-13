@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from abc import ABC, abstractmethod
 
 import msgpack
@@ -96,7 +97,8 @@ class BasePolicy(ABC):
 class MyPolicy(BasePolicy):
     def __init__(self):
         from smolvla_mypolicy import SmolVLAMyPolicy
-        self._impl = SmolVLAMyPolicy("model_weights/smolvla_spatial_lora")
+        model_dir = os.environ.get("PARC_MODEL_DIR", "model_weights/smolvla_spatial_lora")
+        self._impl = SmolVLAMyPolicy(model_dir)
 
     def get_action(self, obs: dict[str, np.ndarray]) -> np.ndarray:
         return self._impl.get_action(obs)

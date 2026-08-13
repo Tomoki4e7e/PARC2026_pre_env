@@ -1,4 +1,4 @@
-"""Lightweight action-conditioned collision critic for the stove task."""
+"""Lightweight action-conditioned collision critics and candidate safety filter."""
 
 from __future__ import annotations
 
@@ -64,13 +64,21 @@ class CollisionCriticConfig:
     threshold: float = 0.5
     risk_margin: float = 0.05
     horizon: int = 12
+    feature_mode: str = "stove_geometry"
+    task_gate: str = "put the bowl on the stove"
+    shield_start: int = 0
+    shield_end: int = 600
+    phase_boundaries: tuple[int, ...] = (18, 29)
+    candidate_deltas: tuple[tuple[float, ...], ...] = ()
 
     @classmethod
     def from_json(cls, path: Path) -> "CollisionCriticConfig":
         raw = json.loads(path.read_text(encoding="utf-8"))
-        for key in ("hidden_dims", "input_mean", "input_std"):
+        for key in ("hidden_dims", "input_mean", "input_std", "phase_boundaries"):
             if key in raw:
                 raw[key] = tuple(raw[key])
+        if "candidate_deltas" in raw:
+            raw["candidate_deltas"] = tuple(tuple(row) for row in raw["candidate_deltas"])
         return cls(**raw)
 
     def to_dict(self) -> dict:
@@ -84,6 +92,12 @@ class CollisionCriticConfig:
             "threshold": self.threshold,
             "risk_margin": self.risk_margin,
             "horizon": self.horizon,
+            "feature_mode": self.feature_mode,
+            "task_gate": self.task_gate,
+            "shield_start": self.shield_start,
+            "shield_end": self.shield_end,
+            "phase_boundaries": list(self.phase_boundaries),
+            "candidate_deltas": [list(row) for row in self.candidate_deltas],
         }
 
 
@@ -116,9 +130,17 @@ class CollisionCritic:
         self.mean = torch.tensor(self.config.input_mean, dtype=torch.float32, device=device)
         self.std = torch.tensor(self.config.input_std, dtype=torch.float32, device=device).clamp_min(1e-6)
 
-    def risk(self, state: np.ndarray, action: np.ndarray, image: np.ndarray) -> tuple[float, bool]:
-        visual = stove_geometry_features(image)
-        detected = bool(visual[0] > 0.5)
+    def _visual_features(self, image: np.ndarray | None) -> tuple[np.ndarray, bool]:
+        if self.config.feature_mode == "stove_geometry":
+            visual = stove_geometry_features(image)
+            return visual, bool(visual[0] > 0.5)
+        if self.config.feature_mode == "state_action":
+            return np.zeros(self.config.visual_dim, dtype=np.float32), True
+        raise ValueError(f"unsupported collision critic feature_mode: {self.config.feature_mode}")
+
+    def risk(self, state: np.ndarray, action: np.ndarray,
+             image: np.ndarray | None = None) -> tuple[float, bool]:
+        visual, detected = self._visual_features(image)
         features = np.concatenate([
             np.asarray(state, dtype=np.float32),
             np.asarray(action, dtype=np.float32),
@@ -128,3 +150,18 @@ class CollisionCritic:
         with torch.inference_mode():
             risk = torch.sigmoid(self.model(inputs.unsqueeze(0)))[0]
         return float(risk.cpu()), detected
+
+    def risks(self, state: np.ndarray, actions: np.ndarray,
+              image: np.ndarray | None = None) -> np.ndarray:
+        """Score a small candidate set in one forward pass."""
+        candidates = np.asarray(actions, dtype=np.float32)
+        if candidates.ndim != 2 or candidates.shape[1] != self.config.action_dim:
+            raise ValueError(f"expected (N, {self.config.action_dim}) actions, got {candidates.shape}")
+        visual, _ = self._visual_features(image)
+        states = np.repeat(np.asarray(state, dtype=np.float32)[None], len(candidates), axis=0)
+        visuals = np.repeat(visual[None], len(candidates), axis=0)
+        features = np.concatenate([states, candidates, visuals], axis=1)
+        inputs = (torch.as_tensor(features, device=self.device) - self.mean) / self.std
+        with torch.inference_mode():
+            scores = torch.sigmoid(self.model(inputs))
+        return scores.detach().cpu().numpy()

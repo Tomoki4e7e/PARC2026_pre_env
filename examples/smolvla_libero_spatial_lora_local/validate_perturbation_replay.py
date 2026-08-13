@@ -170,6 +170,8 @@ def replay(
     episode_id: int = 0,
     visual_domain: dict | None = None,
     camera_size: int = 256,
+    action_transform=None,
+    collection_context: dict | None = None,
 ) -> dict:
     from pipeline.config import EvalConfig
     from pipeline.environment import EnvironmentManager
@@ -217,7 +219,12 @@ def replay(
         front_images, wrist_images, states, recorded_actions = [], [], [], []
         transition_obs, transition_next_obs = [], []
         env_rewards, terminated, collision_flags = [], [], []
-        for action in actions:
+        for step_index, action in enumerate(actions):
+            action = np.asarray(action, dtype=np.float32)
+            if action_transform is not None:
+                action = np.asarray(
+                    action_transform(step_index, obs, action.copy()), dtype=np.float32
+                )
             front_images.append(np.asarray(obs["agentview_image"], dtype=np.uint8))
             wrist_images.append(np.asarray(obs["robot0_eye_in_hand_image"], dtype=np.uint8))
             states.append(np.concatenate([
@@ -225,7 +232,7 @@ def replay(
                 quat_to_axis_angle(obs["robot0_eef_quat"]),
                 np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32),
             ]))
-            recorded_actions.append(np.asarray(action, dtype=np.float32))
+            recorded_actions.append(action)
             if rl_record_dir is not None:
                 transition_obs.append(
                     {key: np.asarray(value).copy() for key, value in obs.items()}
@@ -281,7 +288,9 @@ def replay(
                 collision_flags=collision_flags,
                 success=accepted,
                 collision_threshold_m=0.001,
-                collection_context={"visual_domain": visual_manifest},
+                collection_context={
+                    **(collection_context or {}), "visual_domain": visual_manifest,
+                },
             )
         return {"done": bool(done), "collided": collided,
                 "accepted": accepted, "steps": steps,

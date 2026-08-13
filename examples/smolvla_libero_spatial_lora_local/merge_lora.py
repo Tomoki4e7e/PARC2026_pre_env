@@ -113,6 +113,19 @@ def main() -> None:
         help="table/light replay低LR LoRA出力をマージする",
     )
     parser.add_argument(
+        "--expanded",
+        action="store_true",
+        help="580ep multi-suite/multi-domain拡張LoRA出力をマージする",
+    )
+    parser.add_argument("--curriculum-expanded-base", action="store_true")
+    parser.add_argument("--spatial-corrective", action="store_true")
+    parser.add_argument("--track1-replay", action="store_true")
+    parser.add_argument(
+        "--collision-safe", action="store_true",
+        help="拡張Base中間checkpointへの衝突安全補正LoRAをマージする",
+    )
+    parser.add_argument("--ramekin-preference", action="store_true")
+    parser.add_argument(
         "--reward-weighted-bc",
         action="store_true",
         help="報酬重み付きBC LoRA出力をマージする",
@@ -158,6 +171,12 @@ def main() -> None:
             args.track1_stage2,
             args.augmentation,
             args.perturbation_replay,
+            args.expanded,
+            args.curriculum_expanded_base,
+            args.spatial_corrective,
+            args.track1_replay,
+            args.collision_safe,
+            args.ramekin_preference,
             args.reward_weighted_bc,
             args.stove_collision,
             args.phase3,
@@ -167,13 +186,29 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --reward-weighted-bc / --stove-collision / "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --expanded / "
+            "--curriculum-expanded-base / --spatial-corrective / --track1-replay / "
+            "--collision-safe / "
+            "--ramekin-preference / "
+            "--reward-weighted-bc / --stove-collision / "
             "--phase3 / --phase4 / --phase5 "
             "は同時に指定できません"
         )
 
     if args.stove_collision:
         config.apply_stove_collision_config()
+    elif args.collision_safe:
+        config.apply_collision_safe_config()
+    elif args.ramekin_preference:
+        config.apply_ramekin_preference_config()
+    elif args.track1_replay:
+        config.apply_track1_replay_config()
+    elif args.spatial_corrective:
+        config.apply_spatial_corrective_config()
+    elif args.curriculum_expanded_base:
+        config.apply_curriculum_expanded_config()
+    elif args.expanded:
+        config.apply_expanded_config()
     elif args.perturbation_replay:
         config.apply_perturbation_replay_config()
     elif args.reward_weighted_bc:

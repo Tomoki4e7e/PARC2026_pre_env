@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -160,6 +161,74 @@ PERTURBATION_REPLAY_FREEZE_VISION_ENCODER = True
 PERTURBATION_REPLAY_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_track1_perturbation_replay_lora"
 PERTURBATION_REPLAY_MERGED_MODEL_DIR = WORK_DIR / "smolvla_track1_perturbation_replay_merged"
 PERTURBATION_REPLAY_BASE_MODEL_DIR = STAGE2_MERGED_MODEL_DIR
+
+# ── 現行モデル起点の multi-suite / multi-domain 拡張 LoRA ────────────────
+# Spatial 160 + Object 160 + Goal 100 + texture/light replay 160 = 580 ep。
+EXPANDED_DATASET_REPO = "local/libero_expanded_multisuite_v1"
+EXPANDED_DATASET_ROOT = WORK_DIR / "datasets" / "libero_expanded_multisuite_v1"
+EXPANDED_MANIFEST_PATH = WORK_DIR / "expanded_multisuite_manifest.json"
+EXPANDED_STEPS = 6_000
+EXPANDED_SAVE_FREQ = 1_500
+EXPANDED_LEARNING_RATE = 2e-5
+EXPANDED_FINAL_LEARNING_RATE = 2e-6
+EXPANDED_LORA_R = 16
+EXPANDED_LORA_ALPHA = 16
+EXPANDED_FREEZE_VISION_ENCODER = False
+EXPANDED_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_expanded_multisuite_lora"
+EXPANDED_MERGED_MODEL_DIR = WORK_DIR / "smolvla_expanded_multisuite_merged"
+EXPANDED_BASE_MODEL_DIR = PERTURBATION_REPLAY_MERGED_MODEL_DIR
+
+# ── 拡張Base先行カリキュラム（旧順序とのA/B用に出力を分離） ─────────────
+# 1) 初期SmolVLAから580epを学習、2) 評価失敗Spatialのみ補正、
+# 3) 弱点4タスク170epへ拡張Base代表43epを混ぜる（43 / 213 = 20.2%）。
+CURRICULUM_EXPANDED_OUTPUT_DIR = WORK_DIR / "outputs/smolvla_curriculum_expanded_base_lora"
+CURRICULUM_EXPANDED_MERGED_MODEL_DIR = WORK_DIR / "smolvla_curriculum_expanded_base_merged"
+CURRICULUM_EXPANDED_LEARNING_RATE = 5e-5
+CURRICULUM_EXPANDED_FINAL_LEARNING_RATE = 5e-6
+
+SPATIAL_CORRECTIVE_DATASET_REPO = "local/libero_spatial_failure_corrective_v1"
+SPATIAL_CORRECTIVE_DATASET_ROOT = WORK_DIR / "datasets/libero_spatial_failure_corrective_v1"
+SPATIAL_CORRECTIVE_MANIFEST_PATH = WORK_DIR / "spatial_failure_corrective_manifest.json"
+SPATIAL_CORRECTIVE_STEPS = 2_000
+SPATIAL_CORRECTIVE_SAVE_FREQ = 500
+SPATIAL_CORRECTIVE_LEARNING_RATE = 1e-5
+SPATIAL_CORRECTIVE_FINAL_LEARNING_RATE = 1e-6
+SPATIAL_CORRECTIVE_OUTPUT_DIR = WORK_DIR / "outputs/smolvla_spatial_failure_corrective_lora"
+SPATIAL_CORRECTIVE_MERGED_MODEL_DIR = WORK_DIR / "smolvla_spatial_failure_corrective_merged"
+
+TRACK1_REPLAY_DATASET_REPO = "local/libero_track1_with_expanded_replay_v1"
+TRACK1_REPLAY_DATASET_ROOT = WORK_DIR / "datasets/libero_track1_with_expanded_replay_v1"
+TRACK1_REPLAY_MANIFEST_PATH = WORK_DIR / "track1_with_expanded_replay_manifest.json"
+TRACK1_REPLAY_EPISODES = 43
+TRACK1_REPLAY_STEPS = 6_000
+TRACK1_REPLAY_SAVE_FREQ = 1_500
+TRACK1_REPLAY_LEARNING_RATE = 2e-5
+TRACK1_REPLAY_FINAL_LEARNING_RATE = 2e-6
+TRACK1_REPLAY_OUTPUT_DIR = WORK_DIR / "outputs/smolvla_track1_with_expanded_replay_lora"
+TRACK1_REPLAY_MERGED_MODEL_DIR = WORK_DIR / "smolvla_track1_with_expanded_replay_merged"
+
+# ── 拡張Base中間checkpointへの衝突安全補正 ───────────────────────────────
+# 同一初期状態の「衝突Base軌道 / 非衝突成功軌道」ペアから、安全側のみを
+# BCし、拡張Base代表episodeを40% replayする。500/1000/1500 stepを評価する。
+COLLISION_SAFE_DATASET_REPO = "local/libero_curriculum_collision_safe_v1"
+COLLISION_SAFE_DATASET_ROOT = WORK_DIR / "datasets/libero_curriculum_collision_safe_v1"
+COLLISION_SAFE_MANIFEST_PATH = WORK_DIR / "curriculum_collision_safe_manifest.json"
+COLLISION_SAFE_STEPS = 1_500
+COLLISION_SAFE_SAVE_FREQ = 500
+COLLISION_SAFE_LEARNING_RATE = 5e-6
+COLLISION_SAFE_FINAL_LEARNING_RATE = 2e-6
+COLLISION_SAFE_OUTPUT_DIR = WORK_DIR / "outputs/smolvla_curriculum_collision_safe_lora"
+COLLISION_SAFE_MERGED_MODEL_DIR = WORK_DIR / "smolvla_curriculum_collision_safe_merged"
+COLLISION_SAFE_BASE_MODEL_DIR = WORK_DIR / "curriculum_checkpoint_models/003000"
+
+RAMEKIN_PREFERENCE_DATASET_REPO = "local/libero_ramekin_pairwise_preference_v1"
+RAMEKIN_PREFERENCE_DATASET_ROOT = WORK_DIR / "datasets/libero_ramekin_pairwise_preference_v1"
+RAMEKIN_PREFERENCE_STEPS = 1_500
+RAMEKIN_PREFERENCE_SAVE_FREQ = 500
+RAMEKIN_PREFERENCE_LEARNING_RATE = 2e-6
+RAMEKIN_PREFERENCE_FINAL_LEARNING_RATE = 1e-6
+RAMEKIN_PREFERENCE_OUTPUT_DIR = WORK_DIR / "outputs/smolvla_ramekin_pairwise_preference_lora"
+RAMEKIN_PREFERENCE_MERGED_MODEL_DIR = WORK_DIR / "smolvla_ramekin_pairwise_preference_merged"
 
 STOVE_COLLISION_DATASET_REPO = "local/stove_collision_safe_mixed"
 STOVE_COLLISION_DATASET_ROOT = WORK_DIR / "datasets" / "stove_corrective_mixed_v1"
@@ -464,6 +533,133 @@ def apply_perturbation_replay_config() -> None:
     DATASET_REPO = PERTURBATION_REPLAY_DATASET_REPO
     DATASET_REVISION = None
     IMAGE_AUGMENTATION_ENABLED = False
+
+
+def apply_expanded_config() -> None:
+    """現行摂動Replayモデルを起点にしたmulti-suite拡張LoRA設定。"""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION, IMAGE_AUGMENTATION_ENABLED
+
+    STEPS = EXPANDED_STEPS
+    LEARNING_RATE = EXPANDED_LEARNING_RATE
+    FINAL_LEARNING_RATE = EXPANDED_FINAL_LEARNING_RATE
+    LORA_R = EXPANDED_LORA_R
+    LORA_ALPHA = EXPANDED_LORA_ALPHA
+    FREEZE_VISION_ENCODER = EXPANDED_FREEZE_VISION_ENCODER
+    TRAIN_EXPERT_ONLY = not FREEZE_VISION_ENCODER
+    OUTPUT_DIR = Path(os.environ.get("PARC_EXPANDED_OUTPUT_DIR", str(EXPANDED_OUTPUT_DIR)))
+    MERGED_MODEL_DIR = Path(os.environ.get("PARC_EXPANDED_MERGED_MODEL_DIR", str(EXPANDED_MERGED_MODEL_DIR)))
+    BASE_MODEL_LOCAL = EXPANDED_BASE_MODEL_DIR
+    DATASET_ROOT = Path(os.environ.get("PARC_EXPANDED_DATASET_ROOT", str(EXPANDED_DATASET_ROOT)))
+    SAVE_FREQ = EXPANDED_SAVE_FREQ
+    DATASET_REPO = os.environ.get("PARC_EXPANDED_DATASET_REPO", EXPANDED_DATASET_REPO)
+    DATASET_REVISION = None
+    IMAGE_AUGMENTATION_ENABLED = False
+
+
+def apply_curriculum_expanded_config() -> None:
+    """初期SmolVLAを起点にした拡張Base先行学習。"""
+    apply_expanded_config()
+    global LEARNING_RATE, FINAL_LEARNING_RATE, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL
+
+    LEARNING_RATE = CURRICULUM_EXPANDED_LEARNING_RATE
+    FINAL_LEARNING_RATE = CURRICULUM_EXPANDED_FINAL_LEARNING_RATE
+    OUTPUT_DIR = CURRICULUM_EXPANDED_OUTPUT_DIR
+    MERGED_MODEL_DIR = CURRICULUM_EXPANDED_MERGED_MODEL_DIR
+    BASE_MODEL_LOCAL = None
+
+
+def _apply_curriculum_local_dataset(
+    *, dataset_repo: str, dataset_root: Path, steps: int, save_freq: int,
+    learning_rate: float, final_learning_rate: float, output_dir: Path,
+    merged_model_dir: Path, default_base_model_dir: Path,
+) -> None:
+    """Spatial補正と弱点+Replay段に共通する低LR設定。"""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION, IMAGE_AUGMENTATION_ENABLED
+
+    STEPS = steps
+    LEARNING_RATE = learning_rate
+    FINAL_LEARNING_RATE = final_learning_rate
+    LORA_R = 16
+    LORA_ALPHA = 16
+    FREEZE_VISION_ENCODER = True
+    TRAIN_EXPERT_ONLY = False
+    OUTPUT_DIR = output_dir
+    MERGED_MODEL_DIR = merged_model_dir
+    BASE_MODEL_LOCAL = Path(os.environ.get(
+        "PARC_CURRICULUM_BASE_MODEL_DIR", str(default_base_model_dir)
+    ))
+    DATASET_ROOT = dataset_root
+    SAVE_FREQ = save_freq
+    DATASET_REPO = dataset_repo
+    DATASET_REVISION = None
+    IMAGE_AUGMENTATION_ENABLED = False
+
+
+def apply_spatial_corrective_config() -> None:
+    """拡張Base評価で失敗したSpatial配置だけを補正する。"""
+    _apply_curriculum_local_dataset(
+        dataset_repo=SPATIAL_CORRECTIVE_DATASET_REPO,
+        dataset_root=SPATIAL_CORRECTIVE_DATASET_ROOT,
+        steps=SPATIAL_CORRECTIVE_STEPS,
+        save_freq=SPATIAL_CORRECTIVE_SAVE_FREQ,
+        learning_rate=SPATIAL_CORRECTIVE_LEARNING_RATE,
+        final_learning_rate=SPATIAL_CORRECTIVE_FINAL_LEARNING_RATE,
+        output_dir=SPATIAL_CORRECTIVE_OUTPUT_DIR,
+        merged_model_dir=SPATIAL_CORRECTIVE_MERGED_MODEL_DIR,
+        default_base_model_dir=CURRICULUM_EXPANDED_MERGED_MODEL_DIR,
+    )
+
+
+def apply_track1_replay_config() -> None:
+    """弱点4タスクに拡張Base代表episodeを20%混ぜる追加学習。"""
+    _apply_curriculum_local_dataset(
+        dataset_repo=TRACK1_REPLAY_DATASET_REPO,
+        dataset_root=TRACK1_REPLAY_DATASET_ROOT,
+        steps=TRACK1_REPLAY_STEPS,
+        save_freq=TRACK1_REPLAY_SAVE_FREQ,
+        learning_rate=TRACK1_REPLAY_LEARNING_RATE,
+        final_learning_rate=TRACK1_REPLAY_FINAL_LEARNING_RATE,
+        output_dir=TRACK1_REPLAY_OUTPUT_DIR,
+        merged_model_dir=TRACK1_REPLAY_MERGED_MODEL_DIR,
+        default_base_model_dir=CURRICULUM_EXPANDED_MERGED_MODEL_DIR,
+    )
+
+
+def apply_collision_safe_config() -> None:
+    """選定した拡張Base中間checkpointへ低LRの衝突安全補正を行う。"""
+    _apply_curriculum_local_dataset(
+        dataset_repo=COLLISION_SAFE_DATASET_REPO,
+        dataset_root=COLLISION_SAFE_DATASET_ROOT,
+        steps=COLLISION_SAFE_STEPS,
+        save_freq=COLLISION_SAFE_SAVE_FREQ,
+        learning_rate=COLLISION_SAFE_LEARNING_RATE,
+        final_learning_rate=COLLISION_SAFE_FINAL_LEARNING_RATE,
+        output_dir=COLLISION_SAFE_OUTPUT_DIR,
+        merged_model_dir=COLLISION_SAFE_MERGED_MODEL_DIR,
+        default_base_model_dir=COLLISION_SAFE_BASE_MODEL_DIR,
+    )
+
+
+def apply_ramekin_preference_config() -> None:
+    """Flow-matching pairwise preferenceによるramekin安全補正。"""
+    _apply_curriculum_local_dataset(
+        dataset_repo=RAMEKIN_PREFERENCE_DATASET_REPO,
+        dataset_root=RAMEKIN_PREFERENCE_DATASET_ROOT,
+        steps=RAMEKIN_PREFERENCE_STEPS,
+        save_freq=RAMEKIN_PREFERENCE_SAVE_FREQ,
+        learning_rate=RAMEKIN_PREFERENCE_LEARNING_RATE,
+        final_learning_rate=RAMEKIN_PREFERENCE_FINAL_LEARNING_RATE,
+        output_dir=RAMEKIN_PREFERENCE_OUTPUT_DIR,
+        merged_model_dir=RAMEKIN_PREFERENCE_MERGED_MODEL_DIR,
+        default_base_model_dir=COLLISION_SAFE_BASE_MODEL_DIR,
+    )
 
 
 def apply_reward_weighted_bc_config() -> None:

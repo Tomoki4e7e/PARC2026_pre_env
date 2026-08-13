@@ -149,10 +149,93 @@ class TextureJitter(Transform):
     print(f"[patch] gamma/texture image augmentations ready: {path.name}")
 
 
+def patch_pairwise_preference_training(lerobot_dir: Path) -> None:
+    """Teach the ignored LeRobot checkout to consume chosen/rejected action chunks."""
+    factory = lerobot_dir / "src/lerobot/datasets/factory.py"
+    train = lerobot_dir / "src/lerobot/scripts/lerobot_train.py"
+    if not factory.is_file() or not train.is_file():
+        raise FileNotFoundError(f"LeRobot training sources missing under {lerobot_dir}")
+
+    factory_text = factory.read_text(encoding="utf-8")
+    factory_marker = 'if key == "preference.rejected_action"'
+    if factory_marker not in factory_text:
+        anchor = '''        if key == ACTION and cfg.action_delta_indices is not None:
+            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
+'''
+        addition = anchor + '''        if key == "preference.rejected_action" and cfg.action_delta_indices is not None:
+            delta_timestamps[key] = [i / ds_meta.fps for i in cfg.action_delta_indices]
+'''
+        if anchor not in factory_text:
+            raise RuntimeError(f"Pairwise delta timestamp anchor missing: {factory}")
+        factory.write_text(factory_text.replace(anchor, addition, 1), encoding="utf-8")
+
+    train_text = train.read_text(encoding="utf-8")
+    if "import os\n" not in train_text:
+        train_text = train_text.replace("import logging\n", "import logging\nimport os\n", 1)
+    if 'if "preference.rejected_action" in batch:' not in train_text:
+        loss_anchor = '''        if sample_weights is not None:
+'''
+        loss_block = '''        if "preference.rejected_action" in batch:
+            rejected_action = batch.pop("preference.rejected_action")
+            preference_weight = batch.pop("preference.weight").reshape(-1)
+            cpu_rng = torch.random.get_rng_state()
+            cuda_rng = torch.cuda.get_rng_state() if torch.cuda.is_available() else None
+            chosen_loss, output_dict = policy.forward(batch, reduction="none")
+            torch.random.set_rng_state(cpu_rng)
+            if cuda_rng is not None:
+                torch.cuda.set_rng_state(cuda_rng)
+            rejected_batch = dict(batch)
+            rejected_batch["action"] = rejected_action
+            rejected_loss, _ = policy.forward(rejected_batch, reduction="none")
+            beta = float(os.environ.get("PARC_PREFERENCE_BETA", "5.0"))
+            margin = float(os.environ.get("PARC_PREFERENCE_MARGIN", "0.05"))
+            bc_weight = float(os.environ.get("PARC_PREFERENCE_BC_WEIGHT", "0.5"))
+            preference = torch.nn.functional.softplus(
+                margin - beta * (rejected_loss - chosen_loss)
+            ) / beta
+            active = preference_weight.sum().clamp_min(1.0)
+            pairwise_loss = (preference * preference_weight).sum() / active
+            loss = bc_weight * chosen_loss.mean() + pairwise_loss
+            output_dict.update({
+                "pairwise_loss": pairwise_loss.item(),
+                "chosen_loss": chosen_loss.mean().item(),
+                "rejected_loss": rejected_loss.mean().item(),
+                "preference_gap": (rejected_loss - chosen_loss).mean().item(),
+            })
+        elif sample_weights is not None:
+'''
+        if loss_anchor not in train_text:
+            raise RuntimeError(f"Pairwise loss anchor missing: {train}")
+        train_text = train_text.replace(loss_anchor, loss_block, 1)
+        preprocess_anchor = '''        batch = preprocessor(batch)
+        train_tracker.dataloading_s = time.perf_counter() - start_time
+'''
+        preprocess_block = '''        if "preference.rejected_action" in batch:
+            rejected_raw = batch.pop("preference.rejected_action")
+            preference_weight = batch.pop("preference.weight")
+            raw_batch = dict(batch)
+            batch = preprocessor(dict(raw_batch))
+            rejected_batch = dict(raw_batch)
+            rejected_batch["action"] = rejected_raw
+            rejected_batch = preprocessor(rejected_batch)
+            batch["preference.rejected_action"] = rejected_batch["action"]
+            batch["preference.weight"] = preference_weight.to(batch["action"].device)
+        else:
+            batch = preprocessor(batch)
+        train_tracker.dataloading_s = time.perf_counter() - start_time
+'''
+        if preprocess_anchor not in train_text:
+            raise RuntimeError(f"Pairwise preprocessing anchor missing: {train}")
+        train_text = train_text.replace(preprocess_anchor, preprocess_block, 1)
+    train.write_text(train_text, encoding="utf-8")
+    print("[patch] pairwise preference training ready")
+
+
 def main() -> None:
     lerobot_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parent / "work" / "lerobot"
     patch_train_utils_ntfs(lerobot_dir)
     patch_image_augmentations(lerobot_dir)
+    patch_pairwise_preference_training(lerobot_dir)
 
 
 if __name__ == "__main__":

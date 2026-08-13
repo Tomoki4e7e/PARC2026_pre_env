@@ -741,7 +741,7 @@ class SmolVLAMyPolicy(BasePolicy):
                 residual_dir / "model.safetensors"
             ).is_file()
             if weights_exist:
-                from residual_policy import ResidualActionPolicy
+                from residual_policy import load_residual_policy
 
                 manifest_path = residual_dir / "training_manifest.json"
                 if manifest_path.is_file():
@@ -753,7 +753,7 @@ class SmolVLAMyPolicy(BasePolicy):
                             f"trained={trained_base}, loaded={self.model_sha256}"
                         )
 
-                self._residual_policy = ResidualActionPolicy(residual_dir, self.device)
+                self._residual_policy = load_residual_policy(residual_dir, self.device)
                 print(f"[smolvla] residual policy enabled: {residual_dir}", flush=True)
             elif residual_setting not in ("", "auto"):
                 raise FileNotFoundError(f"residual policy weights not found: {residual_dir}")
@@ -832,7 +832,17 @@ class SmolVLAMyPolicy(BasePolicy):
                     np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32),
                 ]
             )
-            action, self.last_residual = self._residual_policy.apply(state, base_action)
+            try:
+                action, self.last_residual = self._residual_policy.apply(
+                    state,
+                    base_action,
+                    front=obs["agentview_image"],
+                    wrist=obs["robot0_eye_in_hand_image"],
+                    instruction=self.instruction,
+                )
+            except TypeError:
+                # Backward compatibility for the original state/action-only residual.
+                action, self.last_residual = self._residual_policy.apply(state, base_action)
             if (
                 self._collision_critic is not None
                 and self.instruction == "put the bowl on the stove"
@@ -854,7 +864,59 @@ class SmolVLAMyPolicy(BasePolicy):
                 self.last_collision_fallback = residual_risk >= threshold
                 if self.last_collision_fallback:
                     action = base_action.copy()
+        action = self._apply_learned_collision_shield(obs, action)
         return self._apply_collision_shield(obs, action)
+
+    def _apply_learned_collision_shield(
+        self, obs: dict[str, np.ndarray], action: np.ndarray
+    ) -> np.ndarray:
+        """Use the critic to choose a lower-risk local action candidate.
+
+        The unmodified action is always a candidate.  An edit is accepted only when
+        the original exceeds the calibrated threshold and the critic predicts at
+        least ``risk_margin`` improvement, which keeps unrelated tasks unchanged.
+        """
+        critic = self._collision_critic
+        if critic is None or not critic.config.candidate_deltas:
+            return action
+        if self.instruction != critic.config.task_gate:
+            return action
+        step = self._episode_step
+        if step < critic.config.shield_start or step > critic.config.shield_end:
+            return action
+        state = np.concatenate([
+            np.asarray(obs["robot0_eef_pos"], dtype=np.float32),
+            _quat_to_axis_angle(obs["robot0_eef_quat"]),
+            np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32),
+        ])
+        phase = int(np.searchsorted(critic.config.phase_boundaries, step, side="right"))
+        phase = min(phase, len(critic.config.candidate_deltas) - 1)
+        delta = np.asarray(critic.config.candidate_deltas[phase], dtype=np.float32)
+        candidates = [np.asarray(action, dtype=np.float32)]
+        # Stay inside the demonstrated safe-minus-unsafe correction segment;
+        # extrapolation looked safer to the classifier but is not data-supported.
+        for scale in (0.5, 0.75, 1.0):
+            candidates.append(np.clip(action + scale * delta, -1.0, 1.0))
+        candidate_array = np.stack(candidates)
+        risks = critic.risks(state, candidate_array, obs.get("agentview_image"))
+        threshold = float(os.environ.get(
+            "PARC_COLLISION_CRITIC_THRESHOLD", str(critic.config.threshold)))
+        margin = float(os.environ.get(
+            "PARC_COLLISION_CRITIC_MARGIN", str(critic.config.risk_margin)))
+        best = int(np.argmin(risks))
+        self.last_base_collision_risk = float(risks[0])
+        self.last_collision_risk = float(risks[best])
+        accepted = bool(risks[0] >= threshold and best != 0
+                        and risks[best] <= risks[0] - margin)
+        self.last_collision_fallback = accepted
+        if accepted:
+            if COLLISION_SHIELD_DEBUG:
+                print(
+                    f"[smolvla-critic] step={step} phase={phase} candidate={best} "
+                    f"risk={risks[0]:.3f}->{risks[best]:.3f}", flush=True,
+                )
+            return candidate_array[best]
+        return action
 
     @staticmethod
     def _estimate_stove_object_centers(image: np.ndarray) -> tuple[tuple[float, float], tuple[float, float]] | None:

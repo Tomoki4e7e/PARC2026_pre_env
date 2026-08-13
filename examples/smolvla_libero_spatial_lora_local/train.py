@@ -262,6 +262,12 @@ def run_training(
     training_env["HF_HUB_DISABLE_XET"] = "1"
     training_env["HF_HOME"] = os.environ.get("HF_HOME", "")
     training_env["HF_LEROBOT_HOME"] = os.environ.get("HF_LEROBOT_HOME", "")
+    if job_name == "smolvla_ramekin_pairwise_preference_lora":
+        training_env.update({
+            "PARC_PREFERENCE_BETA": "5.0",
+            "PARC_PREFERENCE_MARGIN": "0.05",
+            "PARC_PREFERENCE_BC_WEIGHT": "0.5",
+        })
     # conda activate なしで python 直実行しても lerobot-train を見つけられるようにする
     conda_bin = Path(sys.executable).resolve().parent
     path_parts = training_env.get("PATH", "").split(os.pathsep)
@@ -374,6 +380,31 @@ def main() -> None:
         help="table/light 実レンダリング50:50 replayの低LR LoRA",
     )
     parser.add_argument(
+        "--expanded",
+        action="store_true",
+        help="現行モデル起点の580ep multi-suite/multi-domain拡張LoRA",
+    )
+    parser.add_argument(
+        "--curriculum-expanded-base", action="store_true",
+        help="初期SmolVLA起点の580ep拡張Base先行学習",
+    )
+    parser.add_argument(
+        "--spatial-corrective", action="store_true",
+        help="拡張Base評価で失敗したSpatial配置だけを補正",
+    )
+    parser.add_argument(
+        "--track1-replay", action="store_true",
+        help="弱点4タスク170ep + 拡張Base代表43ep（20.2%% replay）",
+    )
+    parser.add_argument(
+        "--collision-safe", action="store_true",
+        help="同一初期状態の非衝突成功ペア + 拡張Base代表Replayによる安全補正",
+    )
+    parser.add_argument(
+        "--ramekin-preference", action="store_true",
+        help="ramekinの同一観測chosen/rejected行動をpairwise lossで安全補正",
+    )
+    parser.add_argument(
         "--reward-weighted-bc",
         action="store_true",
         help="ローカルRLログから構築した報酬重み付きBCデータで低LR LoRA",
@@ -413,6 +444,12 @@ def main() -> None:
             args.track1_stage2,
             args.augmentation,
             args.perturbation_replay,
+            args.expanded,
+            args.curriculum_expanded_base,
+            args.spatial_corrective,
+            args.track1_replay,
+            args.collision_safe,
+            args.ramekin_preference,
             args.reward_weighted_bc,
             args.stove_collision,
             args.phase3,
@@ -423,7 +460,11 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --reward-weighted-bc / --stove-collision / "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --expanded / "
+            "--curriculum-expanded-base / --spatial-corrective / --track1-replay / "
+            "--collision-safe / "
+            "--ramekin-preference / "
+            "--reward-weighted-bc / --stove-collision / "
             "--phase3 / --phase4 / --phase5 / "
             "--spatial-only は同時に指定できません"
         )
@@ -461,19 +502,47 @@ def main() -> None:
     lerobot_src = _require_lerobot()
 
     # ignored checkout にも再現可能な custom gamma/texture transform を反映する。
-    from apply_lerobot_patches import patch_image_augmentations
+    from apply_lerobot_patches import (
+        patch_image_augmentations,
+        patch_pairwise_preference_training,
+    )
 
     patch_image_augmentations(config.LEROBOT_DIR)
+    if args.ramekin_preference:
+        patch_pairwise_preference_training(config.LEROBOT_DIR)
 
     sys.path.insert(0, str(lerobot_src))
 
-    if args.perturbation_replay or args.reward_weighted_bc or args.stove_collision:
+    local_dataset_mode = any((
+        args.perturbation_replay, args.expanded, args.curriculum_expanded_base,
+        args.spatial_corrective, args.track1_replay, args.reward_weighted_bc,
+        args.stove_collision, args.collision_safe, args.ramekin_preference,
+    ))
+    if local_dataset_mode:
         if args.stove_collision:
             config.apply_stove_collision_config()
             job_name = "smolvla_stove_collision_safe_lora"
+        elif args.collision_safe:
+            config.apply_collision_safe_config()
+            job_name = "smolvla_curriculum_collision_safe_lora"
+        elif args.ramekin_preference:
+            config.apply_ramekin_preference_config()
+            job_name = "smolvla_ramekin_pairwise_preference_lora"
         elif args.reward_weighted_bc:
             config.apply_reward_weighted_bc_config()
             job_name = "smolvla_reward_weighted_bc_lora"
+        elif args.expanded:
+            config.apply_expanded_config()
+            job_name = "smolvla_expanded_multisuite_lora"
+        elif args.curriculum_expanded_base:
+            config.apply_curriculum_expanded_config()
+            job_name = "smolvla_curriculum_expanded_base_lora"
+        elif args.spatial_corrective:
+            config.apply_spatial_corrective_config()
+            job_name = "smolvla_spatial_failure_corrective_lora"
+        elif args.track1_replay:
+            config.apply_track1_replay_config()
+            job_name = "smolvla_track1_with_expanded_replay_lora"
         else:
             config.apply_perturbation_replay_config()
             job_name = "smolvla_track1_perturbation_replay_lora"
@@ -545,7 +614,7 @@ def main() -> None:
     if args.quality_cache is not None:
         config.QUALITY_CACHE_PATH = args.quality_cache
 
-    if not args.phase4 and not args.perturbation_replay and not args.reward_weighted_bc and not args.stove_collision:
+    if not args.phase4 and not local_dataset_mode:
         episode_indices, selected_by_task = select_training_episodes(
             config.DATASET_REPO,
             config.DATASET_REVISION,
@@ -579,8 +648,20 @@ def main() -> None:
         merge_cmd = [sys.executable, str(merge_script)]
         if args.stove_collision:
             merge_cmd.append("--stove-collision")
+        elif args.collision_safe:
+            merge_cmd.append("--collision-safe")
+        elif args.ramekin_preference:
+            merge_cmd.append("--ramekin-preference")
         elif args.reward_weighted_bc:
             merge_cmd.append("--reward-weighted-bc")
+        elif args.expanded:
+            merge_cmd.append("--expanded")
+        elif args.curriculum_expanded_base:
+            merge_cmd.append("--curriculum-expanded-base")
+        elif args.spatial_corrective:
+            merge_cmd.append("--spatial-corrective")
+        elif args.track1_replay:
+            merge_cmd.append("--track1-replay")
         elif args.perturbation_replay:
             merge_cmd.append("--perturbation-replay")
         elif args.phase5:

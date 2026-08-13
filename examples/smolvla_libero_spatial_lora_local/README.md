@@ -79,6 +79,31 @@ python examples/smolvla_libero_spatial_lora_local/merge_lora.py
 
 出力: `work/smolvla_libero_plus_spatial_lora_merged/`
 
+### C.1 拡張Base先行カリキュラムと旧順序A/B
+
+Spatial LoRAを必須の第1段にせず、次の順序を再開可能な一括スクリプトで実行する。
+
+```text
+初期SmolVLA
+  → 580 episode拡張Base（6,000 steps）
+  → Spatial標準10配置を評価
+  → 成功率75%未満の配置だけSpatial補正（改善ゲート付き）
+  → Track 1弱点4タスク170 episode + 拡張Base代表43 episode
+     （Replay比率20.2%）
+  → 旧順序モデルと同じ46タスク・seed・episode数でA/B
+```
+
+```bash
+bash examples/smolvla_libero_spatial_lora_local/run_curriculum_order_ab.sh
+```
+
+比較結果は `results/curriculum_order_ab/comparison.json` に保存される。Spatial補正は
+標準10配置の平均成功率が上がり、全46タスク成功率と衝突率を悪化させない場合だけ
+次段のBaseへ採用する。最終モデルも旧順序より成功率が高く、衝突率が同等以下の
+場合にのみ `improved_over_legacy: true` となる。
+
+各段は出力済みモデル・評価summaryを再利用するため、中断後に同じコマンドで再開できる。
+
 ### D. 提出物（MyPolicy）への組み込み
 
 ```bash
