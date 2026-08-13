@@ -6,6 +6,8 @@ venv/
 LIBERO-plus/
 assets.zip
 submission.zip
+# Generated submission archives in the repository root
+/parc2026_submission*.zip
 
 # Generated PARC submission archives (GitHub 100MB limit)
 parc2026_submission/*.zip
