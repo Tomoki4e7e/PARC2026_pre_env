@@ -380,6 +380,10 @@ def main() -> None:
         help="table/light 実レンダリング50:50 replayの低LR LoRA",
     )
     parser.add_argument(
+        "--drawer-targeted", action="store_true",
+        help="引き出しtable/light成功軌道 + 80%% stage2 replayの低LR LoRA",
+    )
+    parser.add_argument(
         "--expanded",
         action="store_true",
         help="現行モデル起点の580ep multi-suite/multi-domain拡張LoRA",
@@ -444,6 +448,7 @@ def main() -> None:
             args.track1_stage2,
             args.augmentation,
             args.perturbation_replay,
+            args.drawer_targeted,
             args.expanded,
             args.curriculum_expanded_base,
             args.spatial_corrective,
@@ -460,7 +465,7 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --expanded / "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --drawer-targeted / --expanded / "
             "--curriculum-expanded-base / --spatial-corrective / --track1-replay / "
             "--collision-safe / "
             "--ramekin-preference / "
@@ -514,12 +519,15 @@ def main() -> None:
     sys.path.insert(0, str(lerobot_src))
 
     local_dataset_mode = any((
-        args.perturbation_replay, args.expanded, args.curriculum_expanded_base,
+        args.perturbation_replay, args.drawer_targeted, args.expanded, args.curriculum_expanded_base,
         args.spatial_corrective, args.track1_replay, args.reward_weighted_bc,
         args.stove_collision, args.collision_safe, args.ramekin_preference,
     ))
     if local_dataset_mode:
-        if args.stove_collision:
+        if args.drawer_targeted:
+            config.apply_drawer_config()
+            job_name = "smolvla_drawer_targeted_lora"
+        elif args.stove_collision:
             config.apply_stove_collision_config()
             job_name = "smolvla_stove_collision_safe_lora"
         elif args.collision_safe:

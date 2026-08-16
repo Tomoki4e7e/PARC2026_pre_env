@@ -162,6 +162,22 @@ PERTURBATION_REPLAY_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_track1_perturba
 PERTURBATION_REPLAY_MERGED_MODEL_DIR = WORK_DIR / "smolvla_track1_perturbation_replay_merged"
 PERTURBATION_REPLAY_BASE_MODEL_DIR = STAGE2_MERGED_MODEL_DIR
 
+# ── 引き出し弱点専用 LoRA（成功table/light 20% + stage2 replay 80%） ──────
+DRAWER_DATASET_REPO = "local/libero_drawer_targeted_v3"
+DRAWER_DATASET_ROOT = WORK_DIR / "datasets" / "libero_drawer_targeted_v3"
+DRAWER_MANIFEST_PATH = WORK_DIR / "drawer_targeted_v3_manifest.json"
+DRAWER_STEPS = 2_000
+DRAWER_SAVE_FREQ = 500
+DRAWER_LEARNING_RATE = 1e-5
+DRAWER_FINAL_LEARNING_RATE = 1e-6
+DRAWER_LORA_R = 16
+DRAWER_LORA_ALPHA = 16
+DRAWER_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_drawer_targeted_v3_033443_lora"
+DRAWER_MERGED_MODEL_DIR = WORK_DIR / "smolvla_drawer_targeted_v3_033443_merged"
+# 0.33443 submission の実base。旧名 stage2 は現在 80aad1... を指す一方、
+# residual manifest と提出zipは perturbation replay の 8c8a26... を基準にする。
+DRAWER_BASE_MODEL_DIR = PERTURBATION_REPLAY_MERGED_MODEL_DIR
+
 # ── 現行モデル起点の multi-suite / multi-domain 拡張 LoRA ────────────────
 # Spatial 160 + Object 160 + Goal 100 + texture/light replay 160 = 580 ep。
 EXPANDED_DATASET_REPO = "local/libero_expanded_multisuite_v1"
@@ -531,6 +547,30 @@ def apply_perturbation_replay_config() -> None:
     DATASET_ROOT = PERTURBATION_REPLAY_DATASET_ROOT
     SAVE_FREQ = PERTURBATION_REPLAY_SAVE_FREQ
     DATASET_REPO = PERTURBATION_REPLAY_DATASET_REPO
+    DATASET_REVISION = None
+    IMAGE_AUGMENTATION_ENABLED = False
+
+
+def apply_drawer_config() -> None:
+    """引き出し成功軌道へ80%のstage2 replayを混ぜる低LR LoRA設定。"""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION, IMAGE_AUGMENTATION_ENABLED
+
+    STEPS = DRAWER_STEPS
+    LEARNING_RATE = DRAWER_LEARNING_RATE
+    FINAL_LEARNING_RATE = DRAWER_FINAL_LEARNING_RATE
+    LORA_R = DRAWER_LORA_R
+    LORA_ALPHA = DRAWER_LORA_ALPHA
+    FREEZE_VISION_ENCODER = True
+    TRAIN_EXPERT_ONLY = False
+    OUTPUT_DIR = DRAWER_OUTPUT_DIR
+    MERGED_MODEL_DIR = DRAWER_MERGED_MODEL_DIR
+    BASE_MODEL_LOCAL = DRAWER_BASE_MODEL_DIR
+    DATASET_ROOT = DRAWER_DATASET_ROOT
+    SAVE_FREQ = DRAWER_SAVE_FREQ
+    DATASET_REPO = DRAWER_DATASET_REPO
     DATASET_REVISION = None
     IMAGE_AUGMENTATION_ENABLED = False
 

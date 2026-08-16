@@ -112,6 +112,7 @@ def main() -> None:
         action="store_true",
         help="table/light replay低LR LoRA出力をマージする",
     )
+    parser.add_argument("--drawer-targeted", action="store_true")
     parser.add_argument(
         "--expanded",
         action="store_true",
@@ -171,6 +172,7 @@ def main() -> None:
             args.track1_stage2,
             args.augmentation,
             args.perturbation_replay,
+            args.drawer_targeted,
             args.expanded,
             args.curriculum_expanded_base,
             args.spatial_corrective,
@@ -186,7 +188,7 @@ def main() -> None:
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --expanded / "
+            "--stage1 / --track1-stage2 / --augmentation / --perturbation-replay / --drawer-targeted / --expanded / "
             "--curriculum-expanded-base / --spatial-corrective / --track1-replay / "
             "--collision-safe / "
             "--ramekin-preference / "
@@ -195,7 +197,9 @@ def main() -> None:
             "は同時に指定できません"
         )
 
-    if args.stove_collision:
+    if args.drawer_targeted:
+        config.apply_drawer_config()
+    elif args.stove_collision:
         config.apply_stove_collision_config()
     elif args.collision_safe:
         config.apply_collision_safe_config()

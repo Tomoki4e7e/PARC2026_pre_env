@@ -387,16 +387,23 @@ def main() -> None:
     tasks_meta, episodes_meta, frames = load_dataset_tables()
     task_index = {name.replace(" ", "_"): int(row.task_index)
                   for name, row in tasks_meta.iterrows()}
+    # Pre-index once.  The previous nested dataframe scan was O(tasks * episodes
+    # * frames) and made large table/light collections spend minutes before any
+    # simulator worker could start.
+    task_indices_by_episode = frames.groupby("episode_index")["task_index"].unique()
+    source_episodes_by_base: dict[str, list[int]] = {}
+    actions_by_episode: dict[int, list] = {}
     jobs = []
     for row in selected:
         base = row["base_task"]
         source_index = task_index[base]
-        source_episode_ids = [
-            int(ep.episode_index) for _, ep in episodes_meta.iterrows()
-            if source_index in [int(v) for v in frames.loc[
-                frames.episode_index == int(ep.episode_index), "task_index"
-            ].unique()]
-        ]
+        if base not in source_episodes_by_base:
+            source_episodes_by_base[base] = [
+                int(ep.episode_index) for _, ep in episodes_meta.iterrows()
+                if source_index in [int(v) for v in task_indices_by_episode.get(
+                    int(ep.episode_index), [])]
+            ]
+        source_episode_ids = source_episodes_by_base[base]
         requested_ordinals = (
             [int(value) for value in args.episode_ordinals.split(",") if value.strip()]
             if args.episode_ordinals else list(range(args.episodes_per_variant))
@@ -405,7 +412,13 @@ def main() -> None:
             if ordinal >= len(source_episode_ids):
                 raise ValueError(f"episode ordinal out of range: {base} ordinal={ordinal}")
             episode_id = source_episode_ids[ordinal]
-            episode_frames = frames[frames.episode_index == episode_id].sort_values("frame_index")
+            if episode_id not in actions_by_episode:
+                episode_frames = frames[
+                    frames.episode_index == episode_id
+                ].sort_values("frame_index")
+                actions_by_episode[episode_id] = [
+                    np.asarray(action).tolist() for action in episode_frames.action
+                ]
             args.output.parent.mkdir(parents=True, exist_ok=True)
             for visual_index in range(args.visual_variants):
                 visual_domain = None
@@ -423,7 +436,7 @@ def main() -> None:
                     "tasks_csv": str(args.tasks_csv.resolve()),
                     "task_id": row["task_id"],
                     "init_ordinal": ordinal,
-                    "actions": [np.asarray(action).tolist() for action in episode_frames.action],
+                    "actions": actions_by_episode[episode_id],
                     "record_path": str(
                         args.record_dir / f'{row["task_id"]}__ep{ordinal:03d}{visual_tag}.npz'
                     ) if args.record_dir else None,
@@ -449,6 +462,12 @@ def main() -> None:
     worker_env = os.environ.copy()
     worker_env["PYTHONPATH"] = (
         f"{REPO_ROOT / 'LIBERO-plus'}:{REPO_ROOT}:{REPO_ROOT / 'compe'}"
+    )
+    # ImageMagick/MagickWand and MuJoCo shared libraries used by the simulator
+    # live in the established parc2026 conda env, while workers use the venv.
+    shared_lib = "/home/cm-pc/miniconda3/envs/parc2026/lib"
+    worker_env["LD_LIBRARY_PATH"] = ":".join(
+        value for value in (shared_lib, worker_env.get("LD_LIBRARY_PATH", "")) if value
     )
     pending_jobs = []
     for job in jobs:
