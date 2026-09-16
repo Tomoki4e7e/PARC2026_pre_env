@@ -1,0 +1,8 @@
+{
+  "mode": "two_camera",
+  "history": 4,
+  "image_size": 64,
+  "hidden_dim": 128,
+  "threshold": 0.32500000000000007,
+  "hold_steps": 12
+}

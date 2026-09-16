@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "input_scope": "residual_heads_front_plus_vector_base_unchanged",
+  "gate_metric": "strict_gsr_only",
+  "top_tsr_reported": false,
+  "collection": {
+    "train_seed_bands": {
+      "middle": [
+        70000,
+        70249
+      ],
+      "top": [
+        170000,
+        170149
+      ]
+    },
+    "validation_seed_bands": {
+      "middle": [
+        80000,
+        80049
+      ],
+      "top": [
+        180000,
+        180049
+      ]
+    },
+    "dagger_seed_bands": {
+      "middle": [
+        82000,
+        82099
+      ],
+      "top": [
+        182000,
+        182049
+      ]
+    }
+  },
+  "candidate": {
+    "catalog_root_seed": 90000,
+    "tasks": {
+      "open_the_middle_drawer_of_the_cabinet": [
+        2086655818,
+        12809829,
+        201435149,
+        1489116438,
+        520057346
+      ],
+      "open_the_top_drawer_and_put_the_bowl_inside": [
+        859931859,
+        21330360,
+        1134247419,
+        830452880,
+        1256199217
+      ]
+    }
+  },
+  "final": {
+    "catalog_root_seed": 91000,
+    "tasks": {
+      "open_the_middle_drawer_of_the_cabinet": [
+        1432728601,
+        2051038815,
+        702518444,
+        1260590375,
+        1345967917,
+        1572641433,
+        554081168,
+        902034229,
+        972611341,
+        1311452838,
+        1899491929,
+        1906877591,
+        374219871,
+        1040444135,
+        1151144485,
+        1779520020,
+        1820107319,
+        968624874,
+        1746924132,
+        666775356
+      ],
+      "open_the_top_drawer_and_put_the_bowl_inside": [
+        362982881,
+        1323625655,
+        1119387153,
+        617096067,
+        2121078827,
+        1656823502,
+        1550977615,
+        1327954923,
+        1834079524,
+        1374265376,
+        1672962491,
+        721812508,
+        1309436567,
+        2059022472,
+        2042372365,
+        637187941,
+        742106171,
+        1797370220,
+        2111808692,
+        754767046
+      ]
+    }
+  },
+  "candidate_after_dagger": {
+    "catalog_root_seed": 92000,
+    "tasks": {
+      "open_the_middle_drawer_of_the_cabinet": [
+        697391674,
+        600661004,
+        484576137,
+        315146483,
+        914549548
+      ],
+      "open_the_top_drawer_and_put_the_bowl_inside": [
+        783932232,
+        772221827,
+        2119216598,
+        951228403,
+        381438838
+      ]
+    }
+  }
+}

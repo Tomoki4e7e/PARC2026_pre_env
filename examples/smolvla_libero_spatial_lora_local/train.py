@@ -127,6 +127,16 @@ def load_experiment_a_recovery_episode_indices(
     return episodes, selected
 
 
+def load_experiment_a_v5_episode_indices() -> tuple[list[int], dict[str, list[int]]]:
+    import json
+
+    manifest = json.loads(config.EXPERIMENT_A_V5_MANIFEST.read_text())
+    episodes = manifest["selected_episode_indices"]
+    if not episodes:
+        raise RuntimeError("Experiment A v5 dataset is empty")
+    return episodes, manifest["selected_by_task"]
+
+
 def _require_gpu() -> None:
     if not torch.cuda.is_available():
         version = torch.__version__
@@ -296,8 +306,20 @@ def run_training(
     print(f"  suites: freeze_vision_encoder={config.FREEZE_VISION_ENCODER}")
 
     preserve_normalizer = (
-        getattr(config, "PHASE4_PRESERVE_BASE_NORMALIZER", False)
-        and config.DATASET_REPO == config.PHASE4_DATASET_REPO
+        (
+            (
+                getattr(config, "PHASE4_PRESERVE_BASE_NORMALIZER", False)
+                and config.DATASET_REPO == config.PHASE4_DATASET_REPO
+            )
+            or (
+                getattr(config, "EXPERIMENT_A_V5_PRESERVE_BASE_NORMALIZER", False)
+                and config.DATASET_REPO == config.EXPERIMENT_A_V5_DATASET_REPO
+            )
+            or (
+                getattr(config, "EXPERIMENT_A_PRESERVE_BASE_NORMALIZER", False)
+                and config.DATASET_REPO == config.EXPERIMENT_A_DATASET_REPO
+            )
+        )
         and config.DATASET_ROOT is not None
         and (base_model_local / "policy_preprocessor.json").is_file()
     )
@@ -405,6 +427,11 @@ def main() -> None:
         choices=("both", "top", "middle"),
         help="schema-corrected public + strict simulator drawer demos",
     )
+    parser.add_argument(
+        "--experiment-a-v5",
+        action="store_true",
+        help="v4 mergedをcurated arm-correction dataで継続LoRA",
+    )
     args = parser.parse_args()
 
     stage_flags = sum(
@@ -416,6 +443,7 @@ def main() -> None:
             args.phase4,
             args.experiment_a_base,
             args.experiment_a_recovery is not None,
+            args.experiment_a_v5,
             args.spatial_only,
         )
     )
@@ -423,6 +451,7 @@ def main() -> None:
         parser.error(
             "--stage1 / --track1-stage2 / --phase3 / --phase4 / "
             "--experiment-a-base / --experiment-a-recovery / --spatial-only "
+            "/ --experiment-a-v5 "
             "は同時に指定できません"
         )
     if args.stage1 and args.track1_stage2:
@@ -460,7 +489,13 @@ def main() -> None:
 
     sys.path.insert(0, str(lerobot_src))
 
-    if args.phase4:
+    if args.experiment_a_v5:
+        config.apply_experiment_a_v5_config()
+        suites = list(config.EXPERIMENT_A_TRAIN_SUITES)
+        task_episode_overrides = {}
+        job_name = "smolvla_experiment_a_arm_lora_v5"
+        episode_indices, selected_by_task = load_experiment_a_v5_episode_indices()
+    elif args.phase4:
         config.apply_phase4_config()
         episode_indices = load_phase4_episode_indices()
         selected_by_task = {
@@ -525,7 +560,12 @@ def main() -> None:
         else:
             job_name = "smolvla_libero_plus_multisuite_lora"
 
-    if not args.phase4 and not args.experiment_a_base and not args.experiment_a_recovery:
+    if (
+        not args.phase4
+        and not args.experiment_a_base
+        and not args.experiment_a_recovery
+        and not args.experiment_a_v5
+    ):
         episode_indices, selected_by_task = select_training_episodes(
             config.DATASET_REPO,
             config.DATASET_REVISION,
@@ -534,7 +574,7 @@ def main() -> None:
         )
         print(f"Training suites: {[suite.name for suite in suites]}")
         print_episode_selection_summary(selected_by_task, suites)
-    elif args.experiment_a_base or args.experiment_a_recovery:
+    elif args.experiment_a_base or args.experiment_a_recovery or args.experiment_a_v5:
         print(f"Training suites: {[suite.name for suite in suites]}")
         print_episode_selection_summary(selected_by_task, suites)
 
@@ -563,6 +603,8 @@ def main() -> None:
         merge_cmd = [sys.executable, str(merge_script)]
         if args.phase4:
             merge_cmd.append("--phase4")
+        elif args.experiment_a_v5:
+            merge_cmd.append("--experiment-a-v5")
         elif args.experiment_a_base:
             merge_cmd.append("--experiment-a-base")
         elif args.experiment_a_recovery:

@@ -61,6 +61,9 @@ LIBERO-Goal／LIBERO-90 に含まれる可動部操作タスクのうち、ハ�
   位置の追従誤差が閾値以下）が一定時間（例：0.5秒）継続すること。
 - **Task Success（参考指標）**：LIBERO標準のタスク完了基準（引き出しが
   一定量開く等）。Base/Residualの比較においては補助的に記録する。
+- `open the top drawer and put the bowl inside`は靴下着衣支援に必要な
+  handle把持との対応だけを検証し、bowl配置TSRは学習・モデル選択・
+  Phase 1 gateの対象外とする。
 
 Grasp Success判定はMuJoCoの接触情報（contact force, grip site distance）
 から自動判定するスクリプトを別途実装する（§6参照）。
@@ -114,8 +117,8 @@ Base単体の摂動脆弱性を意図的に残し、Residual Policyの寄与を�
 ## 5. 実験手順
 
 ### 5.1 Phase 1: Base Policy学習
-1. 対象3タスクにつき、LIBERO標準デモ（各50 demo）でBase Policyを模倣学習。
-2. 摂動なし（L0）環境での成功率が学習の妥当性確認として90%以上に
+1. 対象drawer 2タスクにつき、LIBERO標準デモと検証済みsim demoでBase Policyを模倣学習。
+2. 摂動なし（L0）環境でのstrict GSRが各drawer taskで90%以上に
    達することを確認してから次フェーズへ進む。
 
 ### 5.2 Phase 2: 摂動下でのBase Policy単体評価（H1）

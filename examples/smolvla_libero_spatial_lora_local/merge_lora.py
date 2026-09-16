@@ -123,6 +123,11 @@ def main() -> None:
         help="Experiment A recovery LoRA output to merge",
     )
     parser.add_argument(
+        "--experiment-a-v5",
+        action="store_true",
+        help="Experiment A v5継続LoRA出力をマージする",
+    )
+    parser.add_argument(
         "--steps",
         type=int,
         default=None,
@@ -139,6 +144,7 @@ def main() -> None:
             args.phase4,
             args.experiment_a_base,
             args.experiment_a_recovery is not None,
+            args.experiment_a_v5,
         )
     )
     if stage_flags > 1:
@@ -147,7 +153,9 @@ def main() -> None:
             "--experiment-a-base / --experiment-a-recovery は同時に指定できません"
         )
 
-    if args.experiment_a_recovery:
+    if args.experiment_a_v5:
+        config.apply_experiment_a_v5_config()
+    elif args.experiment_a_recovery:
         config.apply_experiment_a_recovery_config()
         if args.experiment_a_recovery != "both":
             config.OUTPUT_DIR = config.OUTPUT_DIR.with_name(
@@ -260,20 +268,36 @@ def main() -> None:
 
     # Phase4 v2: 学習中に dataset stats を注入しても、最終は base normalizer を正とする。
     if (
-        getattr(config, "PHASE4_PRESERVE_BASE_NORMALIZER", False)
-        and args.phase4
+        (
+            (
+                getattr(config, "PHASE4_PRESERVE_BASE_NORMALIZER", False)
+                and args.phase4
+            )
+            or (
+                getattr(config, "EXPERIMENT_A_V5_PRESERVE_BASE_NORMALIZER", False)
+                and args.experiment_a_v5
+            )
+            or (
+                getattr(config, "EXPERIMENT_A_PRESERVE_BASE_NORMALIZER", False)
+                and args.experiment_a_base
+            )
+        )
         and (base_model_local / "policy_preprocessor.json").is_file()
     ):
         copy_processors_from_model(base_model_local, config.MERGED_MODEL_DIR)
         print(f"Preserved base normalizer from: {base_model_local}")
 
     _canonicalize_visual_shapes(config.MERGED_MODEL_DIR)
-    if args.experiment_a_recovery:
+    if args.experiment_a_base or args.experiment_a_recovery or args.experiment_a_v5:
+        gripper_encoding = (
+            "zero_one" if args.experiment_a_base else "libero_signed"
+        )
+        gripper_hold_steps = 0 if args.experiment_a_base else 20
         (config.MERGED_MODEL_DIR / "action_schema.json").write_text(
             json.dumps(
                 {
-                    "gripper_encoding": "libero_signed",
-                    "gripper_hold_steps": 20,
+                    "gripper_encoding": gripper_encoding,
+                    "gripper_hold_steps": gripper_hold_steps,
                     "state_dim": 8,
                     "action_dim": 7,
                     "image_keys": [

@@ -47,14 +47,33 @@ def _motion(target: np.ndarray, eef: np.ndarray, gripper: float, gain: float = 1
 class HandleGraspOracle:
     """Research-only simulator oracle used exclusively to generate training data."""
 
-    def __init__(self, env: Any, base_task: str, control_freq: int = 20):
+    def __init__(
+        self,
+        env: Any,
+        base_task: str,
+        control_freq: int = 20,
+        *,
+        base_policy: RemoteBasePolicy | None = None,
+        policy_seed: int | None = None,
+        handle_only: bool = False,
+    ):
         self.env = env
         self.base_task = base_task
         self.tracker = GraspSuccessTracker(env, base_task, control_freq=control_freq)
         self.frames: list[dict[str, Any]] = []
         self.results: list[StageResult] = []
+        self.base_policy = base_policy
+        self.policy_seed = policy_seed
+        self.handle_only = handle_only
 
-    def _record(self, obs: dict[str, np.ndarray], action: np.ndarray, task: str) -> None:
+    def _record(
+        self,
+        obs: dict[str, np.ndarray],
+        action: np.ndarray,
+        task: str,
+        *,
+        base_action: np.ndarray | None = None,
+    ) -> None:
         state = np.concatenate(
             (
                 np.asarray(obs["robot0_eef_pos"], dtype=np.float32),
@@ -62,6 +81,8 @@ class HandleGraspOracle:
                 np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32),
             )
         )
+        if base_action is None and self.base_policy is not None:
+            base_action = np.asarray(self.base_policy.get_action(obs), dtype=np.float32)
         self.frames.append(
             {
                 "observation.images.front": _flip_libero_image(obs["agentview_image"]),
@@ -70,8 +91,32 @@ class HandleGraspOracle:
                 ),
                 "observation.state": state.astype(np.float32),
                 "action": action.astype(np.float32),
+                "base_action": np.asarray(
+                    action if base_action is None else base_action, dtype=np.float32
+                ),
+                "contact": False,
+                "closed": False,
+                "joint_displacement": 0.0,
+                "phase": 0,
                 "task": task,
             }
+        )
+
+    def _annotate_last(self, snapshot: Any, action: np.ndarray) -> None:
+        phase = 0
+        if snapshot.grasp_point_error <= 0.08:
+            phase = 1
+        if snapshot.contact and action[6] > 0.5:
+            phase = 2
+        if snapshot.joint_displacement >= self.tracker.movement_threshold:
+            phase = 3
+        if snapshot.success:
+            phase = 4
+        self.frames[-1].update(
+            contact=snapshot.contact,
+            closed=snapshot.closed,
+            joint_displacement=snapshot.joint_displacement,
+            phase=phase,
         )
 
     def _run_target(
@@ -92,6 +137,12 @@ class HandleGraspOracle:
             action = _motion(target, np.asarray(obs["robot0_eef_pos"]), gripper)
             self._record(obs, action, task)
             obs, _, _, _ = self.env.step(action)
+            snapshot = self.tracker.update(
+                obs,
+                len(self.frames),
+                gripper_command=float(action[6]),
+            )
+            self._annotate_last(snapshot, action)
             used += 1
             if np.linalg.norm(np.asarray(obs["robot0_eef_pos"]) - target) <= tolerance:
                 reached = True
@@ -124,6 +175,7 @@ class HandleGraspOracle:
                 len(self.frames),
                 gripper_command=gripper,
             )
+            self._annotate_last(snapshot, action)
             success |= snapshot.success
         self.results.append(StageResult(name, steps, success))
         return obs, success
@@ -150,6 +202,7 @@ class HandleGraspOracle:
                 len(self.frames),
                 gripper_command=1.0,
             )
+            self._annotate_last(snapshot, action)
             success |= snapshot.success
         self.results.append(StageResult("pull_hold", steps, success))
         return obs, success
@@ -168,6 +221,8 @@ class HandleGraspOracle:
     def collect(
         self, obs: dict[str, np.ndarray], task: str
     ) -> tuple[list[dict[str, Any]], bool, bool]:
+        if self.base_policy is not None:
+            self.base_policy.reset(task, seed=self.policy_seed)
         handle = self.tracker.handle_center()
         eef = np.asarray(obs["robot0_eef_pos"], dtype=np.float64)
         direction = eef - handle
@@ -209,7 +264,7 @@ class HandleGraspOracle:
             task=task,
         )
         pull_target = pregrasp + 0.16 * direction
-        if self.base_task == TOP_DRAWER and grasp_success:
+        if self.base_task == TOP_DRAWER and grasp_success and not self.handle_only:
             obs, _ = self._hold(
                 "release_handle",
                 obs,
@@ -279,25 +334,34 @@ class HandleGraspOracle:
 class PolicyGraspSupervisor(HandleGraspOracle):
     """Collects DAgger corrections while a frozen VLA supplies task motion."""
 
-    def __init__(self, env: Any, base_task: str, policy: RemoteBasePolicy):
+    def __init__(
+        self,
+        env: Any,
+        base_task: str,
+        policy: RemoteBasePolicy,
+        *,
+        policy_seed: int | None = None,
+    ):
         super().__init__(env, base_task)
         self.policy = policy
+        self.policy_seed = policy_seed
 
     def collect(
         self, obs: dict[str, np.ndarray], task: str
     ) -> tuple[list[dict[str, Any]], bool, bool]:
-        self.policy.reset(task)
+        self.policy.reset(task, seed=self.policy_seed)
         close_latched = False
         grasp_success = False
         task_success = False
         for step in range(600):
-            action = np.asarray(self.policy.get_action(obs), dtype=np.float32)
+            base_action = np.asarray(self.policy.get_action(obs), dtype=np.float32)
+            action = base_action.copy()
             contact, _ = self.tracker._contact_state()
             if contact:
                 close_latched = True
             if close_latched:
                 action[6] = 1.0
-            self._record(obs, action, task)
+            self._record(obs, action, task, base_action=base_action)
             obs, _, done, _ = self.env.step(action)
             snapshot = self.tracker.update(
                 obs,
@@ -305,6 +369,21 @@ class PolicyGraspSupervisor(HandleGraspOracle):
                 gripper_command=float(action[6]),
             )
             grasp_success |= snapshot.success
+            phase = 0
+            if snapshot.grasp_point_error <= 0.08:
+                phase = 1
+            if close_latched:
+                phase = 2
+            if snapshot.joint_displacement >= self.tracker.movement_threshold:
+                phase = 3
+            if snapshot.success:
+                phase = 4
+            self.frames[-1].update(
+                contact=snapshot.contact,
+                closed=snapshot.closed,
+                joint_displacement=snapshot.joint_displacement,
+                phase=phase,
+            )
             if snapshot.joint_displacement >= 0.10 and grasp_success:
                 close_latched = False
             task_success |= bool(done) or bool(self.env.check_success())
@@ -314,10 +393,106 @@ class PolicyGraspSupervisor(HandleGraspOracle):
         return self.frames, grasp_success, task_success
 
 
+class ArmCorrectionSupervisor(HandleGraspOracle):
+    """Adds bounded oracle translation labels while retaining Base rotations."""
+
+    def __init__(
+        self,
+        env: Any,
+        base_task: str,
+        policy: RemoteBasePolicy,
+        *,
+        policy_seed: int,
+        translation_limit: float = 0.05,
+    ):
+        super().__init__(env, base_task)
+        self.policy = policy
+        self.policy_seed = policy_seed
+        self.translation_limit = translation_limit
+
+    def collect(
+        self, obs: dict[str, np.ndarray], task: str
+    ) -> tuple[list[dict[str, Any]], bool, bool]:
+        self.policy.reset(task, seed=self.policy_seed)
+        close_latched = False
+        grasp_success = False
+        for step in range(600):
+            base_action = np.asarray(self.policy.get_action(obs), dtype=np.float32)
+            action = base_action.copy()
+            contact, _ = self.tracker._contact_state()
+            if contact:
+                close_latched = True
+            if not close_latched:
+                handle = self.tracker.handle_center()
+                direction = (
+                    np.asarray(obs["robot0_eef_pos"], dtype=np.float64) - handle
+                )
+                direction[2] = 0
+                norm = np.linalg.norm(direction)
+                direction = (
+                    direction / norm
+                    if norm > 1e-6
+                    else np.array([0.0, -1.0, 0.0])
+                )
+                pregrasp = (
+                    handle
+                    + 0.05 * direction
+                    + np.array([0.0, 0.0, 0.01])
+                )
+                expert = _motion(
+                    pregrasp,
+                    np.asarray(obs["robot0_eef_pos"]),
+                    float(base_action[6]),
+                )
+                correction = np.clip(
+                    expert[:3] - base_action[:3],
+                    -self.translation_limit,
+                    self.translation_limit,
+                )
+                action[:3] = np.clip(base_action[:3] + correction, -1.0, 1.0)
+            if close_latched:
+                action[6] = 1.0
+            self._record(obs, action, task, base_action=base_action)
+            obs, _, _, _ = self.env.step(action)
+            snapshot = self.tracker.update(
+                obs,
+                step,
+                gripper_command=float(action[6]),
+            )
+            self._annotate_last(snapshot, action)
+            grasp_success |= snapshot.success
+            if grasp_success:
+                break
+        self.results.append(
+            StageResult("arm_correction_supervision", len(self.frames), grasp_success)
+        )
+        return self.frames, grasp_success, bool(self.env.check_success())
+
+
 def _prepare_output(path: Path) -> None:
     if path.exists():
         shutil.rmtree(path)
     path.mkdir(parents=True)
+
+
+def _save_labeled_episode(
+    path: Path, frames: list[dict[str, Any]], task: str
+) -> None:
+    np.savez_compressed(
+        path,
+        front=np.stack([frame["observation.images.front"] for frame in frames]),
+        wrist=np.stack([frame["observation.images.wrist"] for frame in frames]),
+        state=np.stack([frame["observation.state"] for frame in frames]),
+        action=np.stack([frame["action"] for frame in frames]),
+        base_action=np.stack([frame["base_action"] for frame in frames]),
+        contact=np.asarray([frame["contact"] for frame in frames]),
+        closed=np.asarray([frame["closed"] for frame in frames]),
+        joint_displacement=np.asarray(
+            [frame["joint_displacement"] for frame in frames], dtype=np.float32
+        ),
+        phase=np.asarray([frame["phase"] for frame in frames], dtype=np.int8),
+        task=np.asarray(task),
+    )
 
 
 def collect_dataset(
@@ -328,19 +503,36 @@ def collect_dataset(
     seed: int,
     lerobot_src: Path | None = None,
     server_url: str | None = None,
+    save_failures: int = 0,
+    arm_corrections: bool = False,
+    task_episode_counts: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     from libero.libero.envs import OffScreenRenderEnv
 
     del lerobot_src
     _prepare_output(output)
+    failure_output = output.parent / f"{output.name}_failures"
+    if save_failures:
+        _prepare_output(failure_output)
     catalog = TaskCatalog()
     policy = RemoteBasePolicy(server_url) if server_url else None
-    manifest: dict[str, Any] = {"seed": seed, "tasks": {}, "gripper_encoding": "libero_signed"}
+    manifest: dict[str, Any] = {
+        "seed": seed,
+        "tasks": {},
+        "gripper_encoding": "libero_signed",
+        "collection_mode": "arm_corrections" if arm_corrections else "grasp",
+    }
     for task_index, base_task in enumerate((MIDDLE_DRAWER, TOP_DRAWER)):
+        target_episodes = (
+            task_episode_counts.get(base_task, episodes_per_task)
+            if task_episode_counts
+            else episodes_per_task
+        )
         successes = 0
+        failures_saved = 0
         attempts = 0
         rows = []
-        while successes < episodes_per_task and attempts < max_attempts_per_task:
+        while successes < target_episodes and attempts < max_attempts_per_task:
             episode_seed = seed + task_index * 100_000 + attempts
             spec: TaskSpec = catalog.build(
                 base_tasks=(base_task,),
@@ -362,32 +554,57 @@ def collect_dataset(
                     robot.controller.use_delta = True
                 for _ in range(10):
                     obs, _, _, _ = env.step(np.array([0, 0, 0, 0, 0, 0, -1]))
-                oracle = (
-                    PolicyGraspSupervisor(env, base_task, policy)
-                    if policy is not None
-                    else HandleGraspOracle(env, base_task)
-                )
+                if arm_corrections:
+                    if policy is None:
+                        raise ValueError("--arm-corrections requires --server-url")
+                    oracle = ArmCorrectionSupervisor(
+                        env,
+                        base_task,
+                        policy,
+                        policy_seed=episode_seed,
+                    )
+                else:
+                    oracle = (
+                        PolicyGraspSupervisor(
+                        env, base_task, policy, policy_seed=episode_seed
+                        )
+                        if policy is not None
+                        else HandleGraspOracle(env, base_task)
+                    )
                 frames, grasp_success, task_success = oracle.collect(obs, spec.language)
                 # The strict Phase-1 target is handle GSR. Composite-task TSR is
                 # preserved in the sidecar and never relabeled as successful.
                 accepted = grasp_success
                 if accepted:
                     episode_path = output / f"{base_task}_{successes:03d}.npz"
-                    np.savez_compressed(
+                    _save_labeled_episode(
                         episode_path,
-                        front=np.stack(
-                            [frame["observation.images.front"] for frame in frames]
+                        frames,
+                        (
+                            "open the middle drawer of the cabinet"
+                            if base_task == MIDDLE_DRAWER
+                            else "open the top drawer and put the bowl inside"
                         ),
-                        wrist=np.stack(
-                            [frame["observation.images.wrist"] for frame in frames]
-                        ),
-                        state=np.stack(
-                            [frame["observation.state"] for frame in frames]
-                        ),
-                        action=np.stack([frame["action"] for frame in frames]),
-                        task=np.asarray(spec.language),
                     )
                     successes += 1
+                elif failures_saved < save_failures:
+                    useful = [
+                        frame
+                        for index, frame in enumerate(frames)
+                        if frame["phase"] >= 1 or index % 8 == 0
+                    ]
+                    if useful:
+                        _save_labeled_episode(
+                            failure_output
+                            / f"{base_task}_failure_{failures_saved:03d}.npz",
+                            useful,
+                            (
+                                "open the middle drawer of the cabinet"
+                                if base_task == MIDDLE_DRAWER
+                                else "open the top drawer and put the bowl inside"
+                            ),
+                        )
+                        failures_saved += 1
                 rows.append(
                     {
                         "attempt": attempts,
@@ -458,15 +675,19 @@ def replay_verify_and_trim(output: Path, manifest_path: Path) -> dict[str, Any]:
                         break
                 if success_step is None:
                     raise RuntimeError(f"Replay failed strict GSR: {path}")
-                stop = min(len(data["action"]), success_step + 21)
-                np.savez_compressed(
-                    path,
-                    front=data["front"][:stop],
-                    wrist=data["wrist"][:stop],
-                    state=data["state"][:stop],
-                    action=data["action"][:stop],
-                    task=data["task"],
-                )
+                # Strict GSR is the target. Do not teach the release that follows
+                # a successful grasp, because it directly conflicts with the
+                # required sustained-close behavior.
+                stop = min(len(data["action"]), success_step + 1)
+                payload = {
+                    key: (
+                        data[key]
+                        if key == "task"
+                        else data[key][:stop]
+                    )
+                    for key in data.files
+                }
+                np.savez_compressed(path, **payload)
                 row["verified_success_step"] = success_step
                 row["trimmed_frames"] = stop
             finally:
@@ -484,6 +705,10 @@ def main() -> None:
     parser.add_argument("--lerobot-src", type=Path, required=True)
     parser.add_argument("--server-url")
     parser.add_argument("--replay-trim", action="store_true")
+    parser.add_argument("--save-failures", type=int, default=0)
+    parser.add_argument("--arm-corrections", action="store_true")
+    parser.add_argument("--middle-episodes", type=int)
+    parser.add_argument("--top-episodes", type=int)
     args = parser.parse_args()
     if args.replay_trim:
         result = replay_verify_and_trim(
@@ -506,6 +731,12 @@ def main() -> None:
         seed=args.seed,
         lerobot_src=args.lerobot_src,
         server_url=args.server_url,
+        save_failures=args.save_failures,
+        arm_corrections=args.arm_corrections,
+        task_episode_counts={
+            MIDDLE_DRAWER: args.middle_episodes or args.episodes_per_task,
+            TOP_DRAWER: args.top_episodes or args.episodes_per_task,
+        },
     )
     print(json.dumps({key: value["accepted"] for key, value in result["tasks"].items()}))
 

@@ -10,6 +10,20 @@ import sys
 from .action_schema import ActionSchema, GripperEncoding, validate_observation_schema
 
 
+def configure_execution_horizon(policy, execution_horizon: int | None) -> int:
+    """Set how many decoded actions are executed before observing again."""
+    configured = int(policy.config.n_action_steps)
+    horizon = configured if execution_horizon is None else int(execution_horizon)
+    chunk_size = int(policy.config.chunk_size)
+    if not 1 <= horizon <= chunk_size:
+        raise ValueError(
+            f"execution_horizon must be in [1, {chunk_size}], got {horizon}"
+        )
+    policy.config.n_action_steps = horizon
+    policy.reset()
+    return horizon
+
+
 class BasePolicy(Protocol):
     def reset(self, instruction: str = "", seed: int | None = None) -> None: ...
 
@@ -23,6 +37,8 @@ class FrozenSmolVLAPolicy:
         *,
         gripper_encoding: GripperEncoding | None = None,
         gripper_hold_steps: int | None = None,
+        execution_horizon: int | None = None,
+        execution_horizons: dict[str, int] | None = None,
     ):
         submission_dir = Path(__file__).resolve().parents[2] / "submission_template"
         if str(submission_dir) not in sys.path:
@@ -79,6 +95,14 @@ class FrozenSmolVLAPolicy:
         self.state_dim = 8 if configured_state_dim == 6 else configured_state_dim
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.policy = SmolVLAPolicy.from_pretrained(str(model_path)).to(self.device).eval()
+        self.default_execution_horizon = configure_execution_horizon(
+            self.policy, execution_horizon
+        )
+        self.execution_horizon = self.default_execution_horizon
+        self.execution_horizons = dict(execution_horizons or {})
+        for task, horizon in self.execution_horizons.items():
+            if not 1 <= int(horizon) <= int(self.policy.config.chunk_size):
+                raise ValueError(f"Invalid execution horizon for {task!r}: {horizon}")
         self.preprocess, self.postprocess = _load_pre_post_processors(
             str(model_path), str(self.device)
         )
@@ -86,6 +110,9 @@ class FrozenSmolVLAPolicy:
         self.gripper_hold_steps = gripper_hold_steps
         self._gripper_hold_remaining = 0
         self.instruction = ""
+
+    def set_execution_horizon(self, horizon: int) -> None:
+        self.execution_horizon = configure_execution_horizon(self.policy, horizon)
 
     def reset(self, instruction: str = "", seed: int | None = None) -> None:
         import torch
@@ -98,7 +125,12 @@ class FrozenSmolVLAPolicy:
                 torch.cuda.manual_seed_all(seed)
         self.instruction = _normalize_instruction(instruction)
         self._gripper_hold_remaining = 0
-        self.policy.reset()
+        self.execution_horizon = int(
+            self.execution_horizons.get(
+                self.instruction, self.default_execution_horizon
+            )
+        )
+        self.set_execution_horizon(self.execution_horizon)
 
     def get_action(self, obs: dict[str, np.ndarray]) -> np.ndarray:
         import torch

@@ -1,0 +1,8 @@
+{
+  "mode": "wrist",
+  "history": 4,
+  "image_size": 64,
+  "hidden_dim": 128,
+  "threshold": 0.35000000000000003,
+  "hold_steps": 12
+}

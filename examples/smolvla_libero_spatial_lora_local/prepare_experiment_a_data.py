@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import argparse
+import hashlib
 import shutil
 from collections import defaultdict
 from pathlib import Path
@@ -34,6 +35,7 @@ def build_recovery_dataset() -> None:
     import numpy as np
     import torch
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.configs.video import RGBEncoderConfig
 
     source_manifest = json.loads(
         (config.EXPERIMENT_A_DATASET_ROOT.parent / "experiment_a_manifest.json").read_text()
@@ -50,12 +52,16 @@ def build_recovery_dataset() -> None:
         root=output,
         robot_type="panda",
         use_videos=True,
-        image_writer_threads=8,
-        batch_encoding_size=10,
+        streaming_encoding=True,
+        batch_encoding_size=1,
+        encoder_queue_maxsize=120,
         encoder_threads=4,
+        rgb_encoder=RGBEncoderConfig(
+            vcodec="h264", preset="ultrafast", crf=28, g=2
+        ),
         features={
-            "observation.images.front": {"dtype": "image", "shape": (128, 128, 3), "names": ["height", "width", "channel"]},
-            "observation.images.wrist": {"dtype": "image", "shape": (128, 128, 3), "names": ["height", "width", "channel"]},
+            "observation.images.front": {"dtype": "video", "shape": (128, 128, 3), "names": ["height", "width", "channel"]},
+            "observation.images.wrist": {"dtype": "video", "shape": (128, 128, 3), "names": ["height", "width", "channel"]},
             "observation.state": {"dtype": "float32", "shape": (8,), "names": None},
             "action": {"dtype": "float32", "shape": (7,), "names": None},
         },
@@ -132,6 +138,7 @@ def build_recovery_dataset() -> None:
 def append_dagger_dataset() -> None:
     import numpy as np
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from lerobot.configs.video import RGBEncoderConfig
 
     manifest = json.loads(config.EXPERIMENT_A_RECOVERY_MANIFEST.read_text())
     if manifest.get("dagger_episode_count"):
@@ -141,8 +148,11 @@ def append_dagger_dataset() -> None:
         root=config.EXPERIMENT_A_RECOVERY_DATASET_ROOT,
         video_backend=config.VIDEO_BACKEND,
         image_writer_threads=8,
-        batch_encoding_size=10,
+        batch_encoding_size=1,
         encoder_threads=4,
+        rgb_encoder=RGBEncoderConfig(
+            vcodec="h264", preset="ultrafast", crf=28, g=2
+        ),
     )
     selected_by_task = manifest["selected_by_task"]
     paths = sorted(config.EXPERIMENT_A_DAGGER_ROOT.glob("*.npz"))
@@ -170,15 +180,221 @@ def append_dagger_dataset() -> None:
     print(f"Appended {len(paths)} DAgger episodes")
 
 
+def _v5_quality(path: Path, *, anchor: bool) -> tuple[bool, str]:
+    import numpy as np
+
+    episode = np.load(path)
+    required = {
+        "front",
+        "wrist",
+        "state",
+        "action",
+        "base_action",
+        "contact",
+        "phase",
+        "task",
+    }
+    if not required.issubset(episode.files):
+        return False, "schema"
+    if len(episode["action"]) > 600:
+        return False, "overlong"
+    if not np.isin(episode["action"][:, 6], (-1.0, 1.0)).all():
+        return False, "gripper_encoding"
+    contact = np.flatnonzero(episode["contact"])
+    if not len(contact) or not np.any(episode["phase"] == 4):
+        return False, "strict_grasp_labels"
+    task = str(episode["task"])
+    if task not in {
+        "open the middle drawer of the cabinet",
+        "open the top drawer and put the bowl inside",
+    }:
+        return False, "instruction"
+    if "top drawer" in task:
+        close = np.flatnonzero(episode["action"][: contact[0], 6] > 0.5)
+        if len(close) and contact[0] - close[0] > 30:
+            return False, "early_close"
+    if anchor and not np.array_equal(
+        episode["action"][:, :6], episode["base_action"][:, :6]
+    ):
+        return False, "anchor_arm_changed"
+    return True, "accepted"
+
+
+def _v5_seed(path: Path) -> int:
+    root_name = path.parent.name
+    if root_name.endswith("_dagger_train"):
+        root_name = root_name.removesuffix("_train")
+    manifest = path.parent.parent / f"{root_name}_manifest.json"
+    data = json.loads(manifest.read_text())
+    task_key = (
+        "open_the_middle_drawer_of_the_cabinet"
+        if "middle" in path.name
+        else "open_the_top_drawer_and_put_the_bowl_inside"
+    )
+    index = int(path.stem.rsplit("_", 1)[1])
+    accepted = [row for row in data["tasks"][task_key]["episodes"] if row["accepted"]]
+    return int(accepted[index]["seed"])
+
+
+def build_arm_lora_v5_dataset() -> None:
+    import numpy as np
+    from lerobot.configs.video import RGBEncoderConfig
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    roots = [
+        config.WORK_DIR / "datasets" / "experiment_a_arm_corrections_train",
+        config.WORK_DIR / "datasets" / "experiment_a_arm_corrections_dagger_train",
+    ]
+    anchor_root = config.WORK_DIR / "datasets" / "experiment_a_gripper_labeled"
+    protocol = json.loads(
+        (
+            config.REPO_ROOT
+            / "experiments/libero_residual_rl/artifacts/manifests/arm_reach_seed_protocol.json"
+        ).read_text()
+    )
+    held_out = set()
+    for section in ("candidate", "candidate_after_dagger", "final"):
+        for seeds in protocol.get(section, {}).get("tasks", {}).values():
+            held_out.update(seeds)
+
+    selected: list[tuple[Path, str, int]] = []
+    excluded: list[dict[str, str]] = []
+    for root in roots:
+        for path in sorted(root.glob("*.npz")):
+            accepted, reason = _v5_quality(path, anchor=False)
+            seed = _v5_seed(path)
+            if seed in held_out:
+                accepted, reason = False, "held_out_seed"
+            if accepted:
+                selected.append((path, root.name, seed))
+            else:
+                excluded.append({"path": str(path), "reason": reason})
+
+    anchors_by_task: dict[str, list[tuple[Path, str, int]]] = {
+        "middle": [],
+        "top": [],
+    }
+    for path in sorted(anchor_root.glob("*.npz")):
+        accepted, reason = _v5_quality(path, anchor=True)
+        task = "middle" if "middle" in path.name else "top"
+        if accepted and len(anchors_by_task[task]) < 50:
+            anchors_by_task[task].append((path, "clean_anchor", _v5_seed(path)))
+        elif not accepted:
+            excluded.append({"path": str(path), "reason": f"anchor_{reason}"})
+    if any(len(paths) < 50 for paths in anchors_by_task.values()):
+        raise RuntimeError(
+            f"Insufficient clean anchors: { {k: len(v) for k, v in anchors_by_task.items()} }"
+        )
+    selected.extend(anchors_by_task["middle"])
+    selected.extend(anchors_by_task["top"])
+    seeds = [seed for _, _, seed in selected]
+    if len(seeds) != len(set(seeds)):
+        raise RuntimeError("Duplicate v5 training seeds")
+    if set(seeds) & held_out:
+        raise RuntimeError("v5 training data overlaps candidate/final seeds")
+
+    output = config.EXPERIMENT_A_V5_DATASET_ROOT
+    shutil.rmtree(output, ignore_errors=True)
+    target = LeRobotDataset.create(
+        repo_id=config.EXPERIMENT_A_V5_DATASET_REPO,
+        fps=20,
+        root=output,
+        robot_type="panda",
+        use_videos=True,
+        streaming_encoding=True,
+        batch_encoding_size=1,
+        encoder_queue_maxsize=120,
+        encoder_threads=4,
+        rgb_encoder=RGBEncoderConfig(
+            vcodec="h264", preset="ultrafast", crf=28, g=2
+        ),
+        features={
+            "observation.images.front": {
+                "dtype": "video",
+                "shape": (128, 128, 3),
+                "names": ["height", "width", "channel"],
+            },
+            "observation.images.wrist": {
+                "dtype": "video",
+                "shape": (128, 128, 3),
+                "names": ["height", "width", "channel"],
+            },
+            "observation.state": {
+                "dtype": "float32",
+                "shape": (8,),
+                "names": None,
+            },
+            "action": {"dtype": "float32", "shape": (7,), "names": None},
+        },
+    )
+    selected_by_task: dict[str, list[int]] = defaultdict(list)
+    rows = []
+    for path, source, seed in selected:
+        episode = np.load(path)
+        task = str(episode["task"])
+        output_episode = target.meta.total_episodes
+        selected_by_task[task].append(output_episode)
+        for frame in range(len(episode["action"])):
+            target.add_frame(
+                {
+                    "observation.images.front": episode["front"][frame][::-1, ::-1],
+                    "observation.images.wrist": episode["wrist"][frame][::-1, ::-1],
+                    "observation.state": episode["state"][frame],
+                    "action": episode["action"][frame],
+                    "task": task,
+                }
+            )
+        target.save_episode()
+        rows.append(
+            {
+                "episode_index": output_episode,
+                "source": source,
+                "source_path": str(path),
+                "seed": seed,
+                "task": task,
+                "frames": len(episode["action"]),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            }
+        )
+    target.finalize()
+    manifest = {
+        "dataset_root": str(output),
+        "selected_episode_indices": list(range(target.meta.total_episodes)),
+        "selected_by_task": selected_by_task,
+        "episodes": rows,
+        "excluded": excluded,
+        "held_out_seeds": sorted(held_out),
+        "gripper_encoding": "libero_signed",
+        "base_model": str(config.EXPERIMENT_A_V5_BASE_MODEL_DIR),
+    }
+    config.EXPERIMENT_A_V5_MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(
+        json.dumps(
+            {
+                "episodes": len(rows),
+                "selected_by_task": {
+                    key: len(value) for key, value in selected_by_task.items()
+                },
+                "excluded": len(excluded),
+            },
+            indent=2,
+        )
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--build-recovery", action="store_true")
     parser.add_argument("--append-dagger", action="store_true")
+    parser.add_argument("--build-arm-v5", action="store_true")
     args = parser.parse_args()
     set_hf_env(config.HF_HOME, config.LEROBOT_CACHE)
     lerobot_src = config.LEROBOT_DIR / "src"
     sys.path.insert(0, str(lerobot_src))
-    if args.build_recovery:
+    if args.build_arm_v5:
+        build_arm_lora_v5_dataset()
+        return
+    elif args.build_recovery:
         build_recovery_dataset()
         return
     if args.append_dagger:

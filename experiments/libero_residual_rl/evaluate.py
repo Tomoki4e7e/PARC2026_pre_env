@@ -26,6 +26,8 @@ def evaluate_policy(
     output: str | Path,
     condition_name: str,
     device: str | torch.device | None = None,
+    terminate_on_grasp: bool = False,
+    report_task_success: bool = True,
 ) -> list[dict[str, Any]]:
     target = Path(output)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -35,7 +37,12 @@ def evaluate_policy(
         actor = actor.to(torch_device).eval()
     records: list[dict[str, Any]] = []
     for index, spec in enumerate(specs):
-        env = ResidualLiberoEnv(spec, base_policy, config)
+        env = ResidualLiberoEnv(
+            spec,
+            base_policy,
+            config,
+            terminate_on_grasp=terminate_on_grasp,
+        )
         residual_norms: list[float] = []
         inference_times: list[float] = []
         base_inference_times: list[float] = []
@@ -80,7 +87,7 @@ def evaluate_policy(
             "difficulty": spec.difficulty,
             "seed": spec.seed,
             "grasp_success": bool(tracker and tracker.first_success_step is not None),
-            "task_success": bool(env.task_success),
+            "task_success": bool(env.task_success) if report_task_success else None,
             "time_to_grasp_steps": tracker.first_success_step if tracker else None,
             "max_contact_force": tracker.max_contact_force if tracker else None,
             "grasp_point_error": tracker.min_grasp_point_error if tracker else None,
