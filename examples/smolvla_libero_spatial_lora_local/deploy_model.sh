@@ -49,9 +49,12 @@ case "$VARIANT" in
   phase4_legacy)
     SRC="$WORK/smolvla_libero_diverse_phase4_merged"
     ;;
+  experiment_a)
+    SRC="$WORK/smolvla_experiment_a_base_merged"
+    ;;
   *)
     echo "[deploy] ERROR: unknown variant '$VARIANT'"
-    echo "  use: base, multisuite, spatial, stage2, phase3, phase4, phase4_v2, phase4_legacy"
+    echo "  use: base, multisuite, spatial, stage2, phase3, phase4, phase4_v2, phase4_legacy, experiment_a"
     exit 1
     ;;
 esac

@@ -1,0 +1,303 @@
+{
+  "seed": 10000,
+  "tasks": {
+    "open_the_middle_drawer_of_the_cabinet": {
+      "accepted": 0,
+      "attempts": 3,
+      "episodes": [
+        {
+          "attempt": 0,
+          "seed": 10000,
+          "accepted": false,
+          "grasp_success": false,
+          "task_success": false,
+          "frames": 175,
+          "stages": [
+            {
+              "name": "approach",
+              "steps": 80,
+              "reached": false
+            },
+            {
+              "name": "align_handle",
+              "steps": 5,
+              "reached": false
+            },
+            {
+              "name": "close_handle",
+              "steps": 20,
+              "reached": false
+            },
+            {
+              "name": "pull_hold",
+              "steps": 70,
+              "reached": false
+            }
+          ]
+        },
+        {
+          "attempt": 1,
+          "seed": 10001,
+          "accepted": false,
+          "grasp_success": false,
+          "task_success": false,
+          "frames": 175,
+          "stages": [
+            {
+              "name": "approach",
+              "steps": 80,
+              "reached": false
+            },
+            {
+              "name": "align_handle",
+              "steps": 5,
+              "reached": false
+            },
+            {
+              "name": "close_handle",
+              "steps": 20,
+              "reached": false
+            },
+            {
+              "name": "pull_hold",
+              "steps": 70,
+              "reached": false
+            }
+          ]
+        },
+        {
+          "attempt": 2,
+          "seed": 10002,
+          "accepted": false,
+          "grasp_success": false,
+          "task_success": false,
+          "frames": 175,
+          "stages": [
+            {
+              "name": "approach",
+              "steps": 80,
+              "reached": false
+            },
+            {
+              "name": "align_handle",
+              "steps": 5,
+              "reached": false
+            },
+            {
+              "name": "close_handle",
+              "steps": 20,
+              "reached": false
+            },
+            {
+              "name": "pull_hold",
+              "steps": 70,
+              "reached": false
+            }
+          ]
+        }
+      ]
+    },
+    "open_the_top_drawer_and_put_the_bowl_inside": {
+      "accepted": 0,
+      "attempts": 3,
+      "episodes": [
+        {
+          "attempt": 0,
+          "seed": 110000,
+          "accepted": false,
+          "grasp_success": true,
+          "task_success": false,
+          "frames": 247,
+          "stages": [
+            {
+              "name": "approach",
+              "steps": 22,
+              "reached": true
+            },
+            {
+              "name": "align_handle",
+              "steps": 1,
+              "reached": true
+            },
+            {
+              "name": "close_handle",
+              "steps": 20,
+              "reached": true
+            },
+            {
+              "name": "pull_hold",
+              "steps": 70,
+              "reached": true
+            },
+            {
+              "name": "release_handle",
+              "steps": 12,
+              "reached": false
+            },
+            {
+              "name": "approach_bowl",
+              "steps": 12,
+              "reached": true
+            },
+            {
+              "name": "align_bowl",
+              "steps": 40,
+              "reached": false
+            },
+            {
+              "name": "close_bowl",
+              "steps": 18,
+              "reached": false
+            },
+            {
+              "name": "lift_bowl",
+              "steps": 9,
+              "reached": true
+            },
+            {
+              "name": "transport_bowl",
+              "steps": 25,
+              "reached": true
+            },
+            {
+              "name": "release_bowl",
+              "steps": 18,
+              "reached": false
+            }
+          ]
+        },
+        {
+          "attempt": 1,
+          "seed": 110001,
+          "accepted": false,
+          "grasp_success": true,
+          "task_success": false,
+          "frames": 245,
+          "stages": [
+            {
+              "name": "approach",
+              "steps": 21,
+              "reached": true
+            },
+            {
+              "name": "align_handle",
+              "steps": 1,
+              "reached": true
+            },
+            {
+              "name": "close_handle",
+              "steps": 20,
+              "reached": true
+            },
+            {
+              "name": "pull_hold",
+              "steps": 70,
+              "reached": true
+            },
+            {
+              "name": "release_handle",
+              "steps": 12,
+              "reached": false
+            },
+            {
+              "name": "approach_bowl",
+              "steps": 11,
+              "reached": true
+            },
+            {
+              "name": "align_bowl",
+              "steps": 40,
+              "reached": false
+            },
+            {
+              "name": "close_bowl",
+              "steps": 18,
+              "reached": false
+            },
+            {
+              "name": "lift_bowl",
+              "steps": 9,
+              "reached": true
+            },
+            {
+              "name": "transport_bowl",
+              "steps": 25,
+              "reached": true
+            },
+            {
+              "name": "release_bowl",
+              "steps": 18,
+              "reached": false
+            }
+          ]
+        },
+        {
+          "attempt": 2,
+          "seed": 110002,
+          "accepted": false,
+          "grasp_success": true,
+          "task_success": false,
+          "frames": 245,
+          "stages": [
+            {
+              "name": "approach",
+              "steps": 21,
+              "reached": true
+            },
+            {
+              "name": "align_handle",
+              "steps": 1,
+              "reached": true
+            },
+            {
+              "name": "close_handle",
+              "steps": 20,
+              "reached": true
+            },
+            {
+              "name": "pull_hold",
+              "steps": 70,
+              "reached": true
+            },
+            {
+              "name": "release_handle",
+              "steps": 12,
+              "reached": false
+            },
+            {
+              "name": "approach_bowl",
+              "steps": 11,
+              "reached": true
+            },
+            {
+              "name": "align_bowl",
+              "steps": 40,
+              "reached": false
+            },
+            {
+              "name": "close_bowl",
+              "steps": 18,
+              "reached": false
+            },
+            {
+              "name": "lift_bowl",
+              "steps": 9,
+              "reached": true
+            },
+            {
+              "name": "transport_bowl",
+              "steps": 25,
+              "reached": true
+            },
+            {
+              "name": "release_bowl",
+              "steps": 18,
+              "reached": false
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "gripper_encoding": "libero_signed"
+}

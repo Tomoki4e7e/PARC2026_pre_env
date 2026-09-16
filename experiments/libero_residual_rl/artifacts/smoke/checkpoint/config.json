@@ -1,0 +1,30 @@
+{
+  "seed": 42,
+  "control_freq": 20,
+  "history": 2,
+  "horizon": 4,
+  "image_size": 96,
+  "flow_steps": 2,
+  "gamma": 0.99,
+  "tau": 0.005,
+  "batch_size": 4,
+  "replay_capacity": 100000,
+  "warmup_steps": 4,
+  "train_episodes": 500,
+  "max_episode_steps": 300,
+  "actor_lr": 0.0001,
+  "critic_lr": 0.0003,
+  "policy_delay": 2,
+  "exploration_std": 0.15,
+  "cfm_weight": 0.1,
+  "residual_weight": 0.02,
+  "smoothness_weight": 0.02,
+  "grasp_hold_seconds": 0.5,
+  "limits": {
+    "translation": 0.05,
+    "rotation": 0.08,
+    "gripper": 0.2,
+    "rate": 0.04
+  },
+  "artifact_root": "/mnt/robot_ssd/PARC2026_pre/experiments/libero_residual_rl/artifacts"
+}

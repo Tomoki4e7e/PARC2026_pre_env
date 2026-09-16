@@ -113,6 +113,16 @@ def main() -> None:
         help="第4段階 LIBERO-90 多様タスク LoRA 出力をマージする",
     )
     parser.add_argument(
+        "--experiment-a-base",
+        action="store_true",
+        help="Experiment A Base Policy のLoRA出力をマージする",
+    )
+    parser.add_argument(
+        "--experiment-a-recovery",
+        choices=("both", "top", "middle"),
+        help="Experiment A recovery LoRA output to merge",
+    )
+    parser.add_argument(
         "--steps",
         type=int,
         default=None,
@@ -121,14 +131,34 @@ def main() -> None:
     args = parser.parse_args()
 
     stage_flags = sum(
-        int(x) for x in (args.stage1, args.track1_stage2, args.phase3, args.phase4)
+        int(x)
+        for x in (
+            args.stage1,
+            args.track1_stage2,
+            args.phase3,
+            args.phase4,
+            args.experiment_a_base,
+            args.experiment_a_recovery is not None,
+        )
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --phase3 / --phase4 は同時に指定できません"
+            "--stage1 / --track1-stage2 / --phase3 / --phase4 / "
+            "--experiment-a-base / --experiment-a-recovery は同時に指定できません"
         )
 
-    if args.phase4:
+    if args.experiment_a_recovery:
+        config.apply_experiment_a_recovery_config()
+        if args.experiment_a_recovery != "both":
+            config.OUTPUT_DIR = config.OUTPUT_DIR.with_name(
+                f"{config.OUTPUT_DIR.name}_{args.experiment_a_recovery}"
+            )
+            config.MERGED_MODEL_DIR = config.MERGED_MODEL_DIR.with_name(
+                f"{config.MERGED_MODEL_DIR.name}_{args.experiment_a_recovery}"
+            )
+    elif args.experiment_a_base:
+        config.apply_experiment_a_config()
+    elif args.phase4:
         config.apply_phase4_config()
     elif args.phase3:
         config.apply_phase3_config()
@@ -238,6 +268,23 @@ def main() -> None:
         print(f"Preserved base normalizer from: {base_model_local}")
 
     _canonicalize_visual_shapes(config.MERGED_MODEL_DIR)
+    if args.experiment_a_recovery:
+        (config.MERGED_MODEL_DIR / "action_schema.json").write_text(
+            json.dumps(
+                {
+                    "gripper_encoding": "libero_signed",
+                    "gripper_hold_steps": 20,
+                    "state_dim": 8,
+                    "action_dim": 7,
+                    "image_keys": [
+                        "observation.images.front",
+                        "observation.images.wrist",
+                    ],
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
     merged_weights_path = config.MERGED_MODEL_DIR / "model.safetensors"
     with safe_open(merged_weights_path, framework="pt", device="cpu") as weights:

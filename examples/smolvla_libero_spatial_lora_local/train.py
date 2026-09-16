@@ -93,6 +93,40 @@ def load_phase4_episode_indices() -> list[int]:
     return episodes
 
 
+def load_experiment_a_episode_indices() -> tuple[list[int], dict[str, list[int]]]:
+    import json
+
+    path = config.EXPERIMENT_A_DATASET_ROOT.parent / "experiment_a_manifest.json"
+    if not path.is_file():
+        raise FileNotFoundError(
+            f"Experiment A manifest がありません: {path}\n"
+            "先に prepare_experiment_a_data.py を実行してください。"
+        )
+    manifest = json.loads(path.read_text())
+    return manifest["selected_episode_indices"], manifest["selected_by_task"]
+
+
+def load_experiment_a_recovery_episode_indices(
+    variant: str,
+) -> tuple[list[int], dict[str, list[int]]]:
+    import json
+
+    manifest = json.loads(config.EXPERIMENT_A_RECOVERY_MANIFEST.read_text())
+    selected = manifest["selected_by_task"]
+    if variant != "both":
+        layer = "top" if variant == "top" else "middle"
+        selected = {
+            key: value
+            for key, value in selected.items()
+            if layer in key.lower()
+            and ("drawer" in key.lower() or "layer" in key.lower())
+        }
+    episodes = sorted({episode for values in selected.values() for episode in values})
+    if not episodes:
+        raise RuntimeError(f"No recovery episodes matched variant={variant}")
+    return episodes, selected
+
+
 def _require_gpu() -> None:
     if not torch.cuda.is_available():
         version = torch.__version__
@@ -249,6 +283,9 @@ def run_training(
     training_env["HF_HUB_DISABLE_XET"] = "1"
     training_env["HF_HOME"] = os.environ.get("HF_HOME", "")
     training_env["HF_LEROBOT_HOME"] = os.environ.get("HF_LEROBOT_HOME", "")
+    training_env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + training_env.get(
+        "PATH", ""
+    )
 
     shutil.rmtree(config.OUTPUT_DIR, ignore_errors=True)
 
@@ -260,6 +297,7 @@ def run_training(
 
     preserve_normalizer = (
         getattr(config, "PHASE4_PRESERVE_BASE_NORMALIZER", False)
+        and config.DATASET_REPO == config.PHASE4_DATASET_REPO
         and config.DATASET_ROOT is not None
         and (base_model_local / "policy_preprocessor.json").is_file()
     )
@@ -322,6 +360,12 @@ def main() -> None:
         help="ログ出力先（既定: work/train.log）",
     )
     parser.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="設定の学習step数を一時上書き（段階スモーク用）",
+    )
+    parser.add_argument(
         "--suites",
         default="spatial,object,goal",
         help="学習 suite（カンマ区切り）: spatial,object,goal",
@@ -351,6 +395,16 @@ def main() -> None:
         action="store_true",
         help="LIBERO-90 多様タスク + replay LoRA（ローカル集約データセット）",
     )
+    parser.add_argument(
+        "--experiment-a-base",
+        action="store_true",
+        help="Experiment A の2 drawerタスク各50 demoでBaseを学習",
+    )
+    parser.add_argument(
+        "--experiment-a-recovery",
+        choices=("both", "top", "middle"),
+        help="schema-corrected public + strict simulator drawer demos",
+    )
     args = parser.parse_args()
 
     stage_flags = sum(
@@ -360,12 +414,15 @@ def main() -> None:
             args.track1_stage2,
             args.phase3,
             args.phase4,
+            args.experiment_a_base,
+            args.experiment_a_recovery is not None,
             args.spatial_only,
         )
     )
     if stage_flags > 1:
         parser.error(
-            "--stage1 / --track1-stage2 / --phase3 / --phase4 / --spatial-only "
+            "--stage1 / --track1-stage2 / --phase3 / --phase4 / "
+            "--experiment-a-base / --experiment-a-recovery / --spatial-only "
             "は同時に指定できません"
         )
     if args.stage1 and args.track1_stage2:
@@ -424,6 +481,28 @@ def main() -> None:
                 )
             ],
         )
+    elif args.experiment_a_recovery:
+        config.apply_experiment_a_recovery_config()
+        variant = args.experiment_a_recovery
+        if variant != "both":
+            config.OUTPUT_DIR = config.OUTPUT_DIR.with_name(
+                f"{config.OUTPUT_DIR.name}_{variant}"
+            )
+            config.MERGED_MODEL_DIR = config.MERGED_MODEL_DIR.with_name(
+                f"{config.MERGED_MODEL_DIR.name}_{variant}"
+            )
+        suites = list(config.EXPERIMENT_A_TRAIN_SUITES)
+        task_episode_overrides = {}
+        job_name = f"smolvla_experiment_a_recovery_{variant}"
+        episode_indices, selected_by_task = (
+            load_experiment_a_recovery_episode_indices(variant)
+        )
+    elif args.experiment_a_base:
+        config.apply_experiment_a_config()
+        suites = list(config.EXPERIMENT_A_TRAIN_SUITES)
+        task_episode_overrides = {}
+        job_name = "smolvla_experiment_a_base_lora"
+        episode_indices, selected_by_task = load_experiment_a_episode_indices()
     elif args.phase3:
         config.apply_phase3_config()
         suites = list(config.PHASE3_TRAIN_SUITES)
@@ -446,7 +525,7 @@ def main() -> None:
         else:
             job_name = "smolvla_libero_plus_multisuite_lora"
 
-    if not args.phase4:
+    if not args.phase4 and not args.experiment_a_base and not args.experiment_a_recovery:
         episode_indices, selected_by_task = select_training_episodes(
             config.DATASET_REPO,
             config.DATASET_REVISION,
@@ -455,6 +534,13 @@ def main() -> None:
         )
         print(f"Training suites: {[suite.name for suite in suites]}")
         print_episode_selection_summary(selected_by_task, suites)
+    elif args.experiment_a_base or args.experiment_a_recovery:
+        print(f"Training suites: {[suite.name for suite in suites]}")
+        print_episode_selection_summary(selected_by_task, suites)
+
+    if args.steps is not None:
+        config.STEPS = args.steps
+        config.SAVE_FREQ = min(config.SAVE_FREQ or args.steps, args.steps)
 
     base_model_local = resolve_base_model()
     if config.DATASET_ROOT is None:
@@ -477,12 +563,18 @@ def main() -> None:
         merge_cmd = [sys.executable, str(merge_script)]
         if args.phase4:
             merge_cmd.append("--phase4")
+        elif args.experiment_a_base:
+            merge_cmd.append("--experiment-a-base")
+        elif args.experiment_a_recovery:
+            merge_cmd.extend(["--experiment-a-recovery", args.experiment_a_recovery])
         elif args.phase3:
             merge_cmd.append("--phase3")
         elif args.track1_stage2:
             merge_cmd.append("--track1-stage2")
         elif args.stage1 or not args.spatial_only:
             merge_cmd.append("--stage1")
+        if args.steps is not None:
+            merge_cmd.extend(["--steps", str(args.steps)])
         run_quiet(merge_cmd)
 
 

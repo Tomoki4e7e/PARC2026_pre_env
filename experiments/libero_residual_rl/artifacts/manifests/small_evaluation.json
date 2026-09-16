@@ -1,0 +1,1267 @@
+[
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 1831831029,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 832462417,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 866305012,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 475423979,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 442461789,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_add_28",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_add_28.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 2,
+    "seed": 195101936,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_moved_level1_sample1",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_moved_level1_sample1.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 1,
+    "seed": 1725453703,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_add_14",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_add_14.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 1,
+    "seed": 1414578088,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_add_7",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_add_7.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 1,
+    "seed": 1186796514,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_add_16",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_add_16.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 1,
+    "seed": 1867290495,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_moved_level2_sample4",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_moved_level2_sample4.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 4,
+    "seed": 1487761715,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_moved_level3_sample2",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_moved_level3_sample2.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 5,
+    "seed": 1782919191,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_moved_level2_sample1",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_moved_level2_sample1.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 5,
+    "seed": 29565443,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_moved_level3_sample1",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_moved_level3_sample1.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 4,
+    "seed": 1011333797,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet_moved_level5_sample3",
+    "language": "open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet_moved_level5_sample3.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 5,
+    "seed": 855788920,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 2085300887,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 763510191,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 843849756,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1711098982,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1742716971,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 52042279,
+    "runtime_parameters": {
+      "yaw_deg": -5.6399537831173525,
+      "pitch_deg": -7.240849138773093
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1696165607,
+    "runtime_parameters": {
+      "yaw_deg": -2.859795343819533,
+      "pitch_deg": 3.1709532381832766
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1188134436,
+    "runtime_parameters": {
+      "yaw_deg": -3.754730317394266,
+      "pitch_deg": -7.526910818531118
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 776476570,
+    "runtime_parameters": {
+      "yaw_deg": 7.887181804444808,
+      "pitch_deg": -8.768190286912516
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1999743198,
+    "runtime_parameters": {
+      "yaw_deg": 6.000065614527962,
+      "pitch_deg": -5.458270633644964
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 422926837,
+    "runtime_parameters": {
+      "yaw_deg": 15.919724161037465,
+      "pitch_deg": 10.316363811572565
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 743906159,
+    "runtime_parameters": {
+      "yaw_deg": 1.4848433851769052,
+      "pitch_deg": -21.070114591810544
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 1958326557,
+    "runtime_parameters": {
+      "yaw_deg": -21.526795226774777,
+      "pitch_deg": -16.327443849605356
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 1244415266,
+    "runtime_parameters": {
+      "yaw_deg": -6.6193955960966555,
+      "pitch_deg": 21.582984935783145
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 1414673985,
+    "runtime_parameters": {
+      "yaw_deg": 22.241699389630732,
+      "pitch_deg": 3.3391007152215586
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 226450052,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1165453926,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1058654408,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 898921762,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1091368138,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1736378920,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.02831471444799091,
+      "joint_fraction_1": 0.009942765279743526,
+      "joint_fraction_2": -0.033939231554797084,
+      "joint_fraction_3": -0.03526006452428837,
+      "joint_fraction_4": -0.005571687090646094,
+      "joint_fraction_5": 0.029207929592717535,
+      "joint_fraction_6": -0.01643615286682059
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 582285352,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.04021394947696259,
+      "joint_fraction_1": 0.031378101112276444,
+      "joint_fraction_2": 0.04338455873736689,
+      "joint_fraction_3": 0.014326372529069778,
+      "joint_fraction_4": 0.04579063709376886,
+      "joint_fraction_5": -0.013910809328771312,
+      "joint_fraction_6": 0.012023808122581935
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 606393409,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.015291489275592929,
+      "joint_fraction_1": 0.012326184035253748,
+      "joint_fraction_2": 0.004391063249065477,
+      "joint_fraction_3": 0.03807766050440094,
+      "joint_fraction_4": -0.018469327096085723,
+      "joint_fraction_5": -0.049546947446385714,
+      "joint_fraction_6": -0.02625110865464382
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1941320923,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.04188454779566575,
+      "joint_fraction_1": -0.0023991814223448885,
+      "joint_fraction_2": 0.014107867973989704,
+      "joint_fraction_3": 0.0314162158534009,
+      "joint_fraction_4": -0.025035727966355614,
+      "joint_fraction_5": 0.04152759148741003,
+      "joint_fraction_6": 0.008322320986383677
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1106957342,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.04164896092048609,
+      "joint_fraction_1": 0.045112264217586615,
+      "joint_fraction_2": -0.017200439586532203,
+      "joint_fraction_3": 0.02243218515377378,
+      "joint_fraction_4": -0.01855256719427672,
+      "joint_fraction_5": -0.0055367273578389095,
+      "joint_fraction_6": -0.00654855052775203
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 596077757,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.0972020585089371,
+      "joint_fraction_1": 0.14912396134299175,
+      "joint_fraction_2": -0.05125977053180526,
+      "joint_fraction_3": 0.008800326480680132,
+      "joint_fraction_4": 0.0029197005180701674,
+      "joint_fraction_5": 0.06871111614438019,
+      "joint_fraction_6": 0.1377027099511329
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 250705086,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.08031865546508296,
+      "joint_fraction_1": 0.07858024604488764,
+      "joint_fraction_2": -0.07980672851259389,
+      "joint_fraction_3": 0.012993791392697851,
+      "joint_fraction_4": -0.0632519881848587,
+      "joint_fraction_5": 0.02312695191134495,
+      "joint_fraction_6": -0.0022017093004881305
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 499449699,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.020730106406468662,
+      "joint_fraction_1": 0.059037699322162074,
+      "joint_fraction_2": 0.10868741128114182,
+      "joint_fraction_3": 0.09271812334089335,
+      "joint_fraction_4": 0.09522307272220595,
+      "joint_fraction_5": -0.07773540975021688,
+      "joint_fraction_6": -0.11288319051148743
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 538877336,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.1348869689969223,
+      "joint_fraction_1": 0.0049467079627799615,
+      "joint_fraction_2": -0.04691819664554579,
+      "joint_fraction_3": -0.09316172430242511,
+      "joint_fraction_4": -0.022324091676011154,
+      "joint_fraction_5": 0.0013470593571385248,
+      "joint_fraction_6": -0.07863118825716416
+    }
+  },
+  {
+    "base_task": "open_the_middle_drawer_of_the_cabinet",
+    "task_name": "open_the_middle_drawer_of_the_cabinet",
+    "language": "Open the middle layer of the drawer",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_middle_drawer_of_the_cabinet.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 1944168051,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.11645935858921647,
+      "joint_fraction_1": 0.08015217368204156,
+      "joint_fraction_2": 0.1130394393940902,
+      "joint_fraction_3": -0.12884219382208623,
+      "joint_fraction_4": 0.04346712635126537,
+      "joint_fraction_5": -0.012405693845325194,
+      "joint_fraction_6": 0.12926661674379084
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 57665954,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 822841596,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 486409921,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 58944085,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 1787942934,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_add_14",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_add_14.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 1,
+    "seed": 894775431,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_add_11",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_add_11.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 2,
+    "seed": 1487416300,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_add_3",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_add_3.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 2,
+    "seed": 2052062641,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_add_16",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_add_16.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 1,
+    "seed": 2121618096,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_add_30",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_add_30.bddl",
+    "axis": "layout",
+    "level": 1,
+    "difficulty": 1,
+    "seed": 1783692948,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_moved_level4_sample1",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_moved_level4_sample1.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 5,
+    "seed": 2146225127,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_moved_level3_sample2",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_moved_level3_sample2.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 5,
+    "seed": 1430960521,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_moved_level5_sample2",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_moved_level5_sample2.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 5,
+    "seed": 219027738,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_moved_level5_sample3",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_moved_level5_sample3.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 5,
+    "seed": 436511475,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside_moved_level2_sample3",
+    "language": "open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside_moved_level2_sample3.bddl",
+    "axis": "layout",
+    "level": 2,
+    "difficulty": 4,
+    "seed": 1484793254,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1546292069,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1039558948,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 243260360,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1544718269,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1745922246,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1423522912,
+    "runtime_parameters": {
+      "yaw_deg": 4.777153684363062,
+      "pitch_deg": -0.0646278751256979
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 327404771,
+    "runtime_parameters": {
+      "yaw_deg": 6.02518894992393,
+      "pitch_deg": 0.7209324164153141
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 539832585,
+    "runtime_parameters": {
+      "yaw_deg": -7.684441350059994,
+      "pitch_deg": -6.73414416024025
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1401795176,
+    "runtime_parameters": {
+      "yaw_deg": -9.556382673180394,
+      "pitch_deg": -4.133700118885066
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 1,
+    "difficulty": null,
+    "seed": 468645648,
+    "runtime_parameters": {
+      "yaw_deg": -2.9409345412013383,
+      "pitch_deg": 2.9350696700653742
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 703294092,
+    "runtime_parameters": {
+      "yaw_deg": 20.658445591558667,
+      "pitch_deg": 10.272248568037263
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 48238971,
+    "runtime_parameters": {
+      "yaw_deg": -22.929848123880355,
+      "pitch_deg": 11.740961935758044
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 864128032,
+    "runtime_parameters": {
+      "yaw_deg": -1.6057559458919464,
+      "pitch_deg": 19.019490918477075
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 170290793,
+    "runtime_parameters": {
+      "yaw_deg": -24.52687763687142,
+      "pitch_deg": 18.037554115837814
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "camera",
+    "level": 2,
+    "difficulty": null,
+    "seed": 1417447947,
+    "runtime_parameters": {
+      "yaw_deg": -9.65053498354586,
+      "pitch_deg": -1.1778909258825792
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 697491098,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 437430003,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 850230319,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 2042619131,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 0,
+    "difficulty": null,
+    "seed": 1342091481,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 392512134,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.02038027689223365,
+      "joint_fraction_1": 0.019730515751408523,
+      "joint_fraction_2": 0.027741597287193207,
+      "joint_fraction_3": -0.01935128436086424,
+      "joint_fraction_4": 0.0055122242778280275,
+      "joint_fraction_5": -0.02667749847684128,
+      "joint_fraction_6": 0.009365305846300721
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 2069189474,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.006847328405005446,
+      "joint_fraction_1": 0.038838189572601975,
+      "joint_fraction_2": -0.0447773280677976,
+      "joint_fraction_3": 0.03223531655048288,
+      "joint_fraction_4": -0.028801014558541782,
+      "joint_fraction_5": -0.022753181311181828,
+      "joint_fraction_6": -0.03450501100408809
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1648644441,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.01041096435398059,
+      "joint_fraction_1": -0.009106358862080811,
+      "joint_fraction_2": 0.008226994990861568,
+      "joint_fraction_3": -0.03661516127512398,
+      "joint_fraction_4": -0.005176968850059339,
+      "joint_fraction_5": -0.03792401078487835,
+      "joint_fraction_6": -0.04906573308624408
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1216845801,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.00798952642143793,
+      "joint_fraction_1": -0.03779011718583652,
+      "joint_fraction_2": 0.004532474557860579,
+      "joint_fraction_3": 0.022537433347168845,
+      "joint_fraction_4": -0.007027145933170123,
+      "joint_fraction_5": 0.0016921898042157185,
+      "joint_fraction_6": 0.025736864436814832
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 1,
+    "difficulty": null,
+    "seed": 1996321102,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.005471189825978481,
+      "joint_fraction_1": 0.012929307646262045,
+      "joint_fraction_2": -0.04406505823585732,
+      "joint_fraction_3": -0.0317715211291017,
+      "joint_fraction_4": -0.04140119882312798,
+      "joint_fraction_5": -0.04246741898694,
+      "joint_fraction_6": 0.006138332078903817
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 591445934,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.11264975678284093,
+      "joint_fraction_1": -0.11929443093255258,
+      "joint_fraction_2": -0.13994570462871583,
+      "joint_fraction_3": 0.12704959183867345,
+      "joint_fraction_4": 0.14278849162190702,
+      "joint_fraction_5": -0.008979533257654826,
+      "joint_fraction_6": 0.03436977251378359
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 1609832671,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.11048269585446716,
+      "joint_fraction_1": -0.12151874535823698,
+      "joint_fraction_2": 0.013457191145733544,
+      "joint_fraction_3": 0.0013632941963633294,
+      "joint_fraction_4": -0.10589762734927949,
+      "joint_fraction_5": 0.024862873573644417,
+      "joint_fraction_6": 0.0684024703647306
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 751166668,
+    "runtime_parameters": {
+      "joint_fraction_0": 0.07042132344496937,
+      "joint_fraction_1": -0.018479806634053048,
+      "joint_fraction_2": 0.05843260221218871,
+      "joint_fraction_3": 0.1310059517357612,
+      "joint_fraction_4": -0.06666830955655219,
+      "joint_fraction_5": 0.10050280745315784,
+      "joint_fraction_6": 0.051984630072518245
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 506665004,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.04918200902698251,
+      "joint_fraction_1": -0.06273578295099765,
+      "joint_fraction_2": -0.07067550801173615,
+      "joint_fraction_3": -0.045900615464101624,
+      "joint_fraction_4": 0.09157959609143565,
+      "joint_fraction_5": 0.060151366978340504,
+      "joint_fraction_6": -0.005865696805463061
+    }
+  },
+  {
+    "base_task": "open_the_top_drawer_and_put_the_bowl_inside",
+    "task_name": "open_the_top_drawer_and_put_the_bowl_inside",
+    "language": "Open the top layer of the drawer and put the bowl inside",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_goal/open_the_top_drawer_and_put_the_bowl_inside.bddl",
+    "axis": "robot",
+    "level": 2,
+    "difficulty": null,
+    "seed": 96922300,
+    "runtime_parameters": {
+      "joint_fraction_0": -0.12932955555310086,
+      "joint_fraction_1": 0.012825925308878494,
+      "joint_fraction_2": 0.04723539930521725,
+      "joint_fraction_3": -0.0948290570664031,
+      "joint_fraction_4": -0.05788511198969097,
+      "joint_fraction_5": -0.08333321313768387,
+      "joint_fraction_6": -0.03830144483333994
+    }
+  },
+  {
+    "base_task": "KITCHEN_SCENE7_open_the_microwave",
+    "task_name": "KITCHEN_SCENE7_open_the_microwave",
+    "language": "open the microwave",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_90/KITCHEN_SCENE7_open_the_microwave.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 2067669387,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "KITCHEN_SCENE7_open_the_microwave",
+    "task_name": "KITCHEN_SCENE7_open_the_microwave",
+    "language": "open the microwave",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_90/KITCHEN_SCENE7_open_the_microwave.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 1849990988,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "KITCHEN_SCENE7_open_the_microwave",
+    "task_name": "KITCHEN_SCENE7_open_the_microwave",
+    "language": "open the microwave",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_90/KITCHEN_SCENE7_open_the_microwave.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 1866269539,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "KITCHEN_SCENE7_open_the_microwave",
+    "task_name": "KITCHEN_SCENE7_open_the_microwave",
+    "language": "open the microwave",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_90/KITCHEN_SCENE7_open_the_microwave.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 1551711255,
+    "runtime_parameters": {}
+  },
+  {
+    "base_task": "KITCHEN_SCENE7_open_the_microwave",
+    "task_name": "KITCHEN_SCENE7_open_the_microwave",
+    "language": "open the microwave",
+    "bddl_file": "/mnt/robot_ssd/PARC2026_pre/LIBERO-plus/libero/libero/bddl_files/libero_90/KITCHEN_SCENE7_open_the_microwave.bddl",
+    "axis": "layout",
+    "level": 0,
+    "difficulty": 0,
+    "seed": 193971810,
+    "runtime_parameters": {}
+  }
+]

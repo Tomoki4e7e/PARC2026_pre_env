@@ -174,6 +174,29 @@ PHASE4_MERGED_MODEL_DIR = WORK_DIR / "smolvla_libero_diverse_phase4_v2_merged"
 # stage2 merged をベースにしないと Track1 / hold-out 能力が HF 素モデルへ巻き戻る。
 PHASE4_BASE_MODEL_DIR: Path | None = WORK_DIR / "smolvla_libero_plus_track1_stage2_merged"
 
+# ── Experiment A: handle-grasp Base Policy ──────────────────────────────────
+# The primary perturbation study uses the two goal-suite drawer tasks. Microwave
+# remains an L0-only shape-generalization probe and is intentionally held out.
+EXPERIMENT_A_DATASET_REPO = "nvidia/LIBERO_LeRobot_v3/libero_goal"
+EXPERIMENT_A_DATASET_REVISION = "e5907374380b8f96511957e6ba5582be52a1e179"
+EXPERIMENT_A_STEPS = 10_000
+EXPERIMENT_A_DATASET_ROOT = WORK_DIR / "datasets" / "experiment_a_source" / "libero_goal"
+EXPERIMENT_A_OUTPUT_DIR = WORK_DIR / "outputs" / "smolvla_experiment_a_base_lora"
+EXPERIMENT_A_MERGED_MODEL_DIR = WORK_DIR / "smolvla_experiment_a_base_merged"
+EXPERIMENT_A_ORACLE_ROOT = WORK_DIR / "datasets" / "experiment_a_oracle"
+EXPERIMENT_A_DAGGER_ROOT = WORK_DIR / "datasets" / "experiment_a_dagger"
+EXPERIMENT_A_RECOVERY_DATASET_REPO = "local/experiment_a_recovery"
+EXPERIMENT_A_RECOVERY_DATASET_ROOT = WORK_DIR / "datasets" / "experiment_a_recovery"
+EXPERIMENT_A_RECOVERY_MANIFEST = (
+    EXPERIMENT_A_RECOVERY_DATASET_ROOT.parent / "experiment_a_recovery_manifest.json"
+)
+EXPERIMENT_A_RECOVERY_OUTPUT_DIR = (
+    WORK_DIR / "outputs" / "smolvla_experiment_a_recovery_v4_lora"
+)
+EXPERIMENT_A_RECOVERY_MERGED_MODEL_DIR = (
+    WORK_DIR / "smolvla_experiment_a_recovery_v4_merged"
+)
+
 # ── train.py / merge_lora.py が参照するアクティブ設定（第1段階が既定） ───────
 STEPS = STAGE1_STEPS
 LOG_FREQ = 100
@@ -208,6 +231,18 @@ class TrainSuiteSpec:
     name: str
     task_names: list[str]
     episodes_per_task: int
+
+
+EXPERIMENT_A_TRAIN_SUITES = (
+    TrainSuiteSpec(
+        "libero_goal",
+        [
+            "open the middle drawer of the cabinet",
+            "open the top drawer and put the bowl inside",
+        ],
+        50,
+    ),
+)
 
 
 TRAIN_SUITES: tuple[TrainSuiteSpec, ...] = (
@@ -338,3 +373,39 @@ def apply_phase4_config() -> None:
     SAVE_FREQ = PHASE4_SAVE_FREQ
     DATASET_REPO = PHASE4_DATASET_REPO
     DATASET_REVISION = None
+
+
+def apply_experiment_a_config() -> None:
+    """Configure the two-drawer, no-domain-randomization Base Policy."""
+    global STEPS, LEARNING_RATE, FINAL_LEARNING_RATE, LORA_R, LORA_ALPHA
+    global FREEZE_VISION_ENCODER, TRAIN_EXPERT_ONLY, OUTPUT_DIR, MERGED_MODEL_DIR
+    global BASE_MODEL_LOCAL, DATASET_ROOT, SAVE_FREQ
+    global DATASET_REPO, DATASET_REVISION
+
+    STEPS = EXPERIMENT_A_STEPS
+    LEARNING_RATE = 1e-4
+    FINAL_LEARNING_RATE = 1e-5
+    LORA_R = 16
+    LORA_ALPHA = 16
+    FREEZE_VISION_ENCODER = False
+    TRAIN_EXPERT_ONLY = False
+    OUTPUT_DIR = EXPERIMENT_A_OUTPUT_DIR
+    MERGED_MODEL_DIR = EXPERIMENT_A_MERGED_MODEL_DIR
+    BASE_MODEL_LOCAL = None
+    DATASET_ROOT = EXPERIMENT_A_DATASET_ROOT
+    SAVE_FREQ = 2_500
+    DATASET_REPO = EXPERIMENT_A_DATASET_REPO
+    DATASET_REVISION = EXPERIMENT_A_DATASET_REVISION
+
+
+def apply_experiment_a_recovery_config() -> None:
+    """Configure schema-corrected public + strict simulated grasp training."""
+    apply_experiment_a_config()
+    global OUTPUT_DIR, MERGED_MODEL_DIR, DATASET_ROOT, DATASET_REPO, DATASET_REVISION
+    global SAVE_FREQ
+    OUTPUT_DIR = EXPERIMENT_A_RECOVERY_OUTPUT_DIR
+    MERGED_MODEL_DIR = EXPERIMENT_A_RECOVERY_MERGED_MODEL_DIR
+    DATASET_ROOT = EXPERIMENT_A_RECOVERY_DATASET_ROOT
+    DATASET_REPO = EXPERIMENT_A_RECOVERY_DATASET_REPO
+    DATASET_REVISION = None
+    SAVE_FREQ = 500

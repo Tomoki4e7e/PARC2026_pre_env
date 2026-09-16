@@ -1,0 +1,31 @@
+{
+  "source_repo": "nvidia/LIBERO_LeRobot_v3",
+  "source_revision": "e5907374380b8f96511957e6ba5582be52a1e179",
+  "episodes_per_task": 50,
+  "domain_randomization": false,
+  "tasks": [
+    {
+      "suite": "libero_goal",
+      "name": "open the middle drawer of the cabinet"
+    },
+    {
+      "suite": "libero_goal",
+      "name": "open the top drawer and put the bowl inside"
+    },
+    {
+      "suite": "libero_90",
+      "name": "KITCHEN_SCENE7_open_the_microwave"
+    }
+  ],
+  "base_model": "lerobot/smolvla_libero_plus",
+  "base_model_revision": "7bb70aa5bc92b82c9239142775d3a173103567ff",
+  "training": {
+    "method": "LoRA",
+    "steps": 10000,
+    "batch_size": 1,
+    "learning_rate": 0.0001,
+    "lora_rank": 16,
+    "lora_alpha": 16,
+    "freeze_vision_encoder": false
+  }
+}

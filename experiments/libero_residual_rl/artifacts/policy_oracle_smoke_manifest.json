@@ -1,0 +1,93 @@
+{
+  "seed": 20000,
+  "tasks": {
+    "open_the_middle_drawer_of_the_cabinet": {
+      "accepted": 1,
+      "attempts": 4,
+      "episodes": [
+        {
+          "attempt": 0,
+          "seed": 20000,
+          "accepted": false,
+          "grasp_success": false,
+          "task_success": false,
+          "frames": 600,
+          "stages": [
+            {
+              "name": "policy_supervision",
+              "steps": 600,
+              "reached": false
+            }
+          ]
+        },
+        {
+          "attempt": 1,
+          "seed": 20001,
+          "accepted": false,
+          "grasp_success": false,
+          "task_success": false,
+          "frames": 600,
+          "stages": [
+            {
+              "name": "policy_supervision",
+              "steps": 600,
+              "reached": false
+            }
+          ]
+        },
+        {
+          "attempt": 2,
+          "seed": 20002,
+          "accepted": false,
+          "grasp_success": false,
+          "task_success": false,
+          "frames": 600,
+          "stages": [
+            {
+              "name": "policy_supervision",
+              "steps": 600,
+              "reached": false
+            }
+          ]
+        },
+        {
+          "attempt": 3,
+          "seed": 20003,
+          "accepted": true,
+          "grasp_success": true,
+          "task_success": true,
+          "frames": 145,
+          "stages": [
+            {
+              "name": "policy_supervision",
+              "steps": 145,
+              "reached": true
+            }
+          ]
+        }
+      ]
+    },
+    "open_the_top_drawer_and_put_the_bowl_inside": {
+      "accepted": 1,
+      "attempts": 1,
+      "episodes": [
+        {
+          "attempt": 0,
+          "seed": 120000,
+          "accepted": true,
+          "grasp_success": true,
+          "task_success": false,
+          "frames": 600,
+          "stages": [
+            {
+              "name": "policy_supervision",
+              "steps": 600,
+              "reached": true
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "gripper_encoding": "libero_signed"
+}
