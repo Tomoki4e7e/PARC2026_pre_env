@@ -86,12 +86,55 @@ class LearnedGripperResidualPolicy:
         *,
         post_close_execution_horizon: int | None = None,
         post_close_arm_scale: float = 1.0,
+        post_latch_arm_scale: float | None = None,
+        post_latch_translation_scale: float | None = None,
+        post_latch_rotation_scale: float | None = None,
+        post_latch_vertical_scale: float | None = None,
+        trigger_steps: int = 2,
+        contact_threshold: float = 0.1,
+        closed_threshold: float = 0.055,
+        closure_damping_steps: int = 10,
+        latch_close: bool = True,
+        trace_output: str | Path | None = None,
     ):
         self.base_policy = base_policy
         self.post_close_execution_horizon = post_close_execution_horizon
         if not 0.0 < post_close_arm_scale <= 1.0:
             raise ValueError("post_close_arm_scale must be in (0, 1]")
         self.post_close_arm_scale = float(post_close_arm_scale)
+        if post_latch_arm_scale is None:
+            post_latch_arm_scale = post_close_arm_scale
+        if not 0.0 < post_latch_arm_scale <= 1.0:
+            raise ValueError("post_latch_arm_scale must be in (0, 1]")
+        self.post_latch_arm_scale = float(post_latch_arm_scale)
+        if post_latch_translation_scale is None:
+            post_latch_translation_scale = post_latch_arm_scale
+        if post_latch_rotation_scale is None:
+            post_latch_rotation_scale = post_latch_arm_scale
+        if post_latch_vertical_scale is None:
+            post_latch_vertical_scale = post_latch_translation_scale
+        if not 0.0 < post_latch_translation_scale <= 1.0:
+            raise ValueError("post_latch_translation_scale must be in (0, 1]")
+        if not 0.0 < post_latch_rotation_scale <= 1.0:
+            raise ValueError("post_latch_rotation_scale must be in (0, 1]")
+        if not 0.0 <= post_latch_vertical_scale <= 1.0:
+            raise ValueError("post_latch_vertical_scale must be in [0, 1]")
+        self.post_latch_translation_scale = float(post_latch_translation_scale)
+        self.post_latch_rotation_scale = float(post_latch_rotation_scale)
+        self.post_latch_vertical_scale = float(post_latch_vertical_scale)
+        if trigger_steps < 1:
+            raise ValueError("trigger_steps must be positive")
+        if not 0.0 <= contact_threshold <= 1.0:
+            raise ValueError("contact_threshold must be in [0, 1]")
+        if closed_threshold <= 0.0:
+            raise ValueError("closed_threshold must be positive")
+        if closure_damping_steps < 0:
+            raise ValueError("closure_damping_steps must be non-negative")
+        self.trigger_steps = int(trigger_steps)
+        self.contact_threshold = float(contact_threshold)
+        self.closed_threshold = float(closed_threshold)
+        self.closure_damping_steps = int(closure_damping_steps)
+        self.latch_close = bool(latch_close)
         root = Path(checkpoint)
         self.config = GripperHeadConfig(**json.loads((root / "config.json").read_text()))
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -102,14 +145,32 @@ class LearnedGripperResidualPolicy:
             maxlen=self.config.history
         )
         self.hold_remaining = 0
+        self.trigger_count = 0
+        self.close_latched = False
+        self.damping_remaining = 0
         self.last_probability = 0.0
+        self.last_contact_probability = 0.0
+        self.last_phase = 0
         self._post_close_horizon_applied = False
+        self.trace_output = Path(trace_output) if trace_output is not None else None
+        if self.trace_output is not None:
+            self.trace_output.parent.mkdir(parents=True, exist_ok=True)
+            self.trace_output.unlink(missing_ok=True)
+        self.episode_index = -1
+        self.step_index = 0
+        self.instruction = ""
 
     def reset(self, instruction: str = "", seed: int | None = None) -> None:
         self.base_policy.reset(instruction, seed=seed)
         self.history.clear()
         self.hold_remaining = 0
+        self.trigger_count = 0
+        self.close_latched = False
+        self.damping_remaining = 0
         self._post_close_horizon_applied = False
+        self.episode_index += 1
+        self.step_index = 0
+        self.instruction = instruction
 
     @staticmethod
     def _state(obs: dict[str, np.ndarray]) -> np.ndarray:
@@ -163,10 +224,22 @@ class LearnedGripperResidualPolicy:
             None
         ].to(self.device)
         with torch.inference_mode():
-            close_logit, _, _ = self.model(images, vectors)
+            close_logit, contact_logit, phase_logit = self.model(images, vectors)
             self.last_probability = float(torch.sigmoid(close_logit)[0])
-        if self.last_probability >= self.config.threshold:
+            self.last_contact_probability = float(torch.sigmoid(contact_logit)[0])
+            self.last_phase = int(torch.argmax(phase_logit, dim=-1)[0])
+        eligible = (
+            self.last_probability >= self.config.threshold
+            and self.last_contact_probability >= self.contact_threshold
+            and self.last_phase >= 1
+        )
+        self.trigger_count = self.trigger_count + 1 if eligible else 0
+        triggered = self.trigger_count >= self.trigger_steps
+        if triggered:
             self.hold_remaining = self.config.hold_steps
+            if not self.close_latched:
+                self.damping_remaining = self.closure_damping_steps
+            self.close_latched |= self.latch_close
             if (
                 self.post_close_execution_horizon is not None
                 and not self._post_close_horizon_applied
@@ -176,10 +249,71 @@ class LearnedGripperResidualPolicy:
                     self.post_close_execution_horizon
                 )
                 self._post_close_horizon_applied = True
-        if self.hold_remaining > 0:
-            base_action[:6] *= self.post_close_arm_scale
+        gripper = np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32)
+        aperture = (
+            abs(float(gripper[0] - gripper[1]))
+            if gripper.size >= 2
+            else abs(float(gripper[0]))
+        )
+        close_active = self.close_latched or self.hold_remaining > 0
+        damping_active = (
+            close_active
+            and self.damping_remaining > 0
+            and aperture > self.closed_threshold
+        )
+        if close_active:
+            if damping_active:
+                base_action[:6] *= self.post_close_arm_scale
+            else:
+                base_action[:3] *= self.post_latch_translation_scale
+                base_action[2] *= (
+                    self.post_latch_vertical_scale
+                    / self.post_latch_translation_scale
+                )
+                base_action[3:6] *= self.post_latch_rotation_scale
             base_action[6] = 1.0
-            self.hold_remaining -= 1
+            self.hold_remaining = max(0, self.hold_remaining - 1)
+            if aperture <= self.closed_threshold:
+                self.damping_remaining = 0
+            else:
+                self.damping_remaining = max(0, self.damping_remaining - 1)
+        if self.trace_output is not None:
+            row = {
+                "episode_index": self.episode_index,
+                "step": self.step_index,
+                "instruction": self.instruction,
+                "close_probability": self.last_probability,
+                "contact_probability": self.last_contact_probability,
+                "phase": self.last_phase,
+                "aperture": aperture,
+                "eligible": eligible,
+                "trigger_count": self.trigger_count,
+                "close_latched": self.close_latched,
+                "hold_remaining": self.hold_remaining,
+                "damping_remaining": self.damping_remaining,
+                "translation_scale": (
+                    self.post_close_arm_scale
+                    if damping_active else (
+                        self.post_latch_translation_scale if close_active else 1.0
+                    )
+                ),
+                "rotation_scale": (
+                    self.post_close_arm_scale
+                    if damping_active else (
+                        self.post_latch_rotation_scale if close_active else 1.0
+                    )
+                ),
+                "vertical_scale": (
+                    self.post_close_arm_scale
+                    if damping_active else (
+                        self.post_latch_vertical_scale if close_active else 1.0
+                    )
+                ),
+                "action": base_action.tolist(),
+            }
+            with self.trace_output.open("a") as stream:
+                stream.write(json.dumps(row) + "\n")
+        self.step_index += 1
         return base_action
 
 

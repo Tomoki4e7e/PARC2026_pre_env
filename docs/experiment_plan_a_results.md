@@ -290,3 +290,47 @@ Phase 1は通過扱いにしない。final結果を用いた再選定・追加�
 - model / gripper head SHA-256:
   `af42eba30300ca1cfa3e9c3cf6dab01d12ea1a542ff47e151b2bbf3615984b78`,
   `fc25a36c443cbb5f5d2bcbc1a5518ee457e51ca3ef4fde97839d582aa3938a01`
+
+## State-driven grasp controller回復試行
+
+既知finalのmiddle失敗4件をstep trace付きで再現した。元のgripper headは
+close予測が高い間に12-step holdを毎step更新するため、arm 0.5倍減衰が
+最大500 step以上継続していた。joint変位0.0016の`hold_failed` 2件は
+この過減衰と整合し、別の1件はclose予測低下後に再openしていた。
+
+learned contact/phase、2-step debounce、close latch、aperture依存の段階別
+arm scaleを実装し、任意のstep traceを追加した。ただし既知失敗seedだけで
+scaleを調整すると0/4まで悪化したため、既知finalは回帰専用とし、新たに
+validation root 101000、development root 103000、recovery development
+root 105000、未開封final root 107000を固定した。全episode seedは既存の
+train/validation/candidate/finalと非重複である。
+
+最小close latchはvalidationでmiddle/top各9/10だったが、developmentでは
+middle 13/20、top 15/20となり、`target_missed`が主因へ移った。そこで
+arm residualをgripper headと独立に合成できるようにし、既存404 episodeで
+front/two-camera headを再学習した。さらに未使用学習seedでon-policy DAggerを
+実施し、成功150件とhard failure 9件を追加した。成功軌道だけを採用する
+survivorship biasへ対応するためfailure軌道も学習対象に含め、task conditioning
+とtop専用headも比較した。
+
+最良の統一policyはv4 Base + task-conditioned two-camera arm head
+（scale 0.05）+ two-camera gripper headで、独立recovery development結果は:
+
+- middle: GSR 18/20（90%）。`target_missed` 1、`hold_failed` 1
+- top: GSR 16/20（80%）。`target_missed` 4
+
+top専用headの最良候補も17/20であり、事前固定したdevelopment安全条件
+（両task 19/20）を満たさなかった。追加DAgger後の候補もvalidationで8/10へ
+悪化したため、これ以上の同一splitへの適合は行わなかった。従ってroot 107000の
+fresh finalは開封せず、Phase 1は未通過のままである。
+
+成果物:
+
+- summary:
+  `experiments/libero_residual_rl/artifacts/results/phase1_state_latch_recovery_summary.json`
+- seed protocol:
+  `experiments/libero_residual_rl/artifacts/manifests/phase1_state_latch_seed_protocol.json`
+- selected arm head SHA-256:
+  `b7d667b6eaeef6f046be928094ba432b0048aa4e2be748e99ba595883fbd1f90`
+- development artifact SHA-256:
+  `d1329fe3baa744b87e5b2a014b5b6f62a7ba7c63138f1967eaefe028cf8056f1`

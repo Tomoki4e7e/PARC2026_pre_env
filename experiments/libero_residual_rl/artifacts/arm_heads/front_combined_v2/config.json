@@ -1,0 +1,8 @@
+{
+  "history": 4,
+  "image_size": 64,
+  "hidden_dim": 128,
+  "translation_limit": 0.05,
+  "rotation_limit": 0.08,
+  "rate_limit": 0.04
+}

@@ -32,6 +32,8 @@ def test_learned_head_never_changes_arm_coordinates(tmp_path):
     for parameter in model.parameters():
         parameter.data.zero_()
     model.close.bias.data.fill_(10)
+    model.contact.bias.data.fill_(10)
+    model.phase.bias.data[1] = 10
     torch.save(model.state_dict(), tmp_path / "model.pt")
     (tmp_path / "config.json").write_text(json.dumps(config.__dict__))
 
@@ -50,7 +52,7 @@ def test_learned_head_never_changes_arm_coordinates(tmp_path):
 
     base = Base()
     policy = LearnedGripperResidualPolicy(
-        base, tmp_path, post_close_execution_horizon=50
+        base, tmp_path, post_close_execution_horizon=50, trigger_steps=1
     )
     obs = {
         "agentview_image": np.zeros((128, 128, 3), np.uint8),
@@ -65,4 +67,89 @@ def test_learned_head_never_changes_arm_coordinates(tmp_path):
     assert base.horizons == [50]
     policy.get_action(obs)
     assert base.horizons == [50]
+
+
+def test_gripper_latch_switches_to_post_latch_scale_when_closed(tmp_path):
+    config = GripperHeadConfig(mode="vector", threshold=0.5)
+    model = TemporalGripperHead(config)
+    for parameter in model.parameters():
+        parameter.data.zero_()
+    model.close.bias.data.fill_(10)
+    model.contact.bias.data.fill_(10)
+    model.phase.bias.data[2] = 10
+    torch.save(model.state_dict(), tmp_path / "model.pt")
+    (tmp_path / "config.json").write_text(json.dumps(config.__dict__))
+
+    class Base:
+        def reset(self, instruction="", seed=None):
+            pass
+
+        def get_action(self, obs):
+            return np.array([0.2, -0.2, 0.4, 0.1, -0.1, 0.3, -1], np.float32)
+
+    policy = LearnedGripperResidualPolicy(
+        Base(),
+        tmp_path,
+        post_close_arm_scale=0.5,
+        post_latch_arm_scale=0.3,
+        post_latch_translation_scale=0.7,
+        post_latch_vertical_scale=0.1,
+        trigger_steps=2,
+        closure_damping_steps=10,
+    )
+    obs = {
+        "agentview_image": np.zeros((128, 128, 3), np.uint8),
+        "robot0_eye_in_hand_image": np.zeros((128, 128, 3), np.uint8),
+        "robot0_eef_pos": np.zeros(3, np.float32),
+        "robot0_eef_quat": np.array([0, 0, 0, 1], np.float32),
+        "robot0_gripper_qpos": np.array([0.04, -0.04], np.float32),
+    }
+    assert policy.get_action(obs)[6] == -1
+    closing = policy.get_action(obs)
+    assert np.allclose(closing[:6], Base().get_action(obs)[:6] * 0.5)
+    assert closing[6] == 1
+    assert policy.close_latched
+
+    obs["robot0_gripper_qpos"] = np.array([0.02, -0.02], np.float32)
+    closed = policy.get_action(obs)
+    expected = Base().get_action(obs)
+    assert np.allclose(closed[:2], expected[:2] * 0.7)
+    assert np.isclose(closed[2], expected[2] * 0.1)
+    assert np.allclose(closed[3:6], expected[3:6] * 0.3)
+    assert closed[6] == 1
+
+    policy.reset()
+    assert not policy.close_latched
+    assert policy.trigger_count == 0
+    assert policy.get_action(obs)[6] == -1
+
+
+def test_gripper_trigger_requires_learned_contact(tmp_path):
+    config = GripperHeadConfig(mode="vector", threshold=0.5)
+    model = TemporalGripperHead(config)
+    for parameter in model.parameters():
+        parameter.data.zero_()
+    model.close.bias.data.fill_(10)
+    model.contact.bias.data.fill_(-10)
+    model.phase.bias.data[2] = 10
+    torch.save(model.state_dict(), tmp_path / "model.pt")
+    (tmp_path / "config.json").write_text(json.dumps(config.__dict__))
+
+    class Base:
+        def reset(self, instruction="", seed=None):
+            pass
+
+        def get_action(self, obs):
+            return np.array([0, 0, 0, 0, 0, 0, -1], np.float32)
+
+    policy = LearnedGripperResidualPolicy(Base(), tmp_path, trigger_steps=1)
+    obs = {
+        "agentview_image": np.zeros((128, 128, 3), np.uint8),
+        "robot0_eye_in_hand_image": np.zeros((128, 128, 3), np.uint8),
+        "robot0_eef_pos": np.zeros(3, np.float32),
+        "robot0_eef_quat": np.array([0, 0, 0, 1], np.float32),
+        "robot0_gripper_qpos": np.array([0.04, -0.04], np.float32),
+    }
+    assert policy.get_action(obs)[6] == -1
+    assert not policy.close_latched
 

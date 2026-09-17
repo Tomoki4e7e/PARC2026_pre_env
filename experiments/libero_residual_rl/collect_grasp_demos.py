@@ -734,8 +734,16 @@ def main() -> None:
         save_failures=args.save_failures,
         arm_corrections=args.arm_corrections,
         task_episode_counts={
-            MIDDLE_DRAWER: args.middle_episodes or args.episodes_per_task,
-            TOP_DRAWER: args.top_episodes or args.episodes_per_task,
+            MIDDLE_DRAWER: (
+                args.middle_episodes
+                if args.middle_episodes is not None
+                else args.episodes_per_task
+            ),
+            TOP_DRAWER: (
+                args.top_episodes
+                if args.top_episodes is not None
+                else args.episodes_per_task
+            ),
         },
     )
     print(json.dumps({key: value["accepted"] for key, value in result["tasks"].items()}))

@@ -15,6 +15,11 @@ def main() -> None:
     parser.add_argument("--arm-refinement-head")
     parser.add_argument("--arm-scale", type=float, default=1.0)
     parser.add_argument(
+        "--arm-gate-mode",
+        choices=("approach", "contact", "none"),
+        default="approach",
+    )
+    parser.add_argument(
         "--execution-horizon",
         type=int,
         default=None,
@@ -24,6 +29,20 @@ def main() -> None:
     parser.add_argument("--top-execution-horizon", type=int)
     parser.add_argument("--post-close-execution-horizon", type=int)
     parser.add_argument("--post-close-arm-scale", type=float, default=1.0)
+    parser.add_argument("--post-latch-arm-scale", type=float)
+    parser.add_argument("--post-latch-translation-scale", type=float)
+    parser.add_argument("--post-latch-rotation-scale", type=float)
+    parser.add_argument("--post-latch-vertical-scale", type=float)
+    parser.add_argument("--gripper-trigger-steps", type=int, default=2)
+    parser.add_argument("--gripper-contact-threshold", type=float, default=0.1)
+    parser.add_argument("--gripper-closed-threshold", type=float, default=0.055)
+    parser.add_argument("--gripper-closure-damping-steps", type=int, default=10)
+    parser.add_argument(
+        "--gripper-latch-close",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+    )
+    parser.add_argument("--gripper-trace-output")
     parser.add_argument(
         "--gripper-encoding",
         choices=("zero_one", "libero_signed"),
@@ -38,7 +57,7 @@ def main() -> None:
     from policy_server import app, set_policy
 
     from .base_policy import FrozenSmolVLAPolicy
-    from .arm_residual_head import LearnedFrontGraspPolicy
+    from .arm_residual_head import LearnedArmResidualPolicy, LearnedFrontGraspPolicy
     from .gripper_head import LearnedGripperResidualPolicy
 
     task_horizons = {
@@ -68,19 +87,37 @@ def main() -> None:
     if args.arm_head:
         if not args.gripper_head:
             parser.error("--arm-head requires --gripper-head")
-        policy = LearnedFrontGraspPolicy(
-            policy,
-            arm_checkpoint=args.arm_head,
-            gripper_checkpoint=args.gripper_head,
-            arm_refinement_checkpoint=args.arm_refinement_head,
-            arm_scale=args.arm_scale,
-        )
-    elif args.gripper_head:
+        if args.arm_refinement_head:
+            policy = LearnedFrontGraspPolicy(
+                policy,
+                arm_checkpoint=args.arm_head,
+                gripper_checkpoint=args.gripper_head,
+                arm_refinement_checkpoint=args.arm_refinement_head,
+                arm_scale=args.arm_scale,
+            )
+        else:
+            policy = LearnedArmResidualPolicy(
+                policy,
+                args.arm_head,
+                arm_scale=args.arm_scale,
+                gate_mode=args.arm_gate_mode,
+            )
+    if args.gripper_head and not args.arm_refinement_head:
         policy = LearnedGripperResidualPolicy(
             policy,
             args.gripper_head,
             post_close_execution_horizon=args.post_close_execution_horizon,
             post_close_arm_scale=args.post_close_arm_scale,
+            post_latch_arm_scale=args.post_latch_arm_scale,
+            post_latch_translation_scale=args.post_latch_translation_scale,
+            post_latch_rotation_scale=args.post_latch_rotation_scale,
+            post_latch_vertical_scale=args.post_latch_vertical_scale,
+            trigger_steps=args.gripper_trigger_steps,
+            contact_threshold=args.gripper_contact_threshold,
+            closed_threshold=args.gripper_closed_threshold,
+            closure_damping_steps=args.gripper_closure_damping_steps,
+            latch_close=args.gripper_latch_close,
+            trace_output=args.gripper_trace_output,
         )
     set_policy(policy)
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")

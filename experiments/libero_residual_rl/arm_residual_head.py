@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Literal
 
 import argparse
 import json
@@ -18,6 +19,8 @@ from .gripper_head import GripperHeadConfig, TemporalGripperHead
 
 @dataclass(frozen=True)
 class ArmHeadConfig:
+    mode: Literal["front", "two_camera"] = "front"
+    task_conditioned: bool = False
     history: int = 4
     image_size: int = 64
     hidden_dim: int = 128
@@ -33,8 +36,9 @@ class TemporalArmResidualHead(nn.Module):
     def __init__(self, config: ArmHeadConfig):
         super().__init__()
         self.config = config
+        channels = 6 if config.mode == "two_camera" else 3
         self.visual = nn.Sequential(
-            nn.Conv2d(3, 24, 5, stride=2),
+            nn.Conv2d(channels, 24, 5, stride=2),
             nn.SiLU(),
             nn.Conv2d(24, 48, 3, stride=2),
             nn.SiLU(),
@@ -44,7 +48,7 @@ class TemporalArmResidualHead(nn.Module):
             nn.Flatten(),
         )
         self.frame = nn.Sequential(
-            nn.Linear(64 + 15, config.hidden_dim),
+            nn.Linear(64 + 15 + int(config.task_conditioned), config.hidden_dim),
             nn.SiLU(),
             nn.LayerNorm(config.hidden_dim),
         )
@@ -85,6 +89,8 @@ class ArmCorrectionDataset(Dataset):
         self.active_labels: list[float] = []
         for episode_index, episode in enumerate(self.episodes):
             required = {"front", "state", "action", "base_action", "phase", "contact"}
+            if config.mode == "two_camera":
+                required.add("wrist")
             if not required.issubset(episode):
                 continue
             for frame, phase in enumerate(episode["phase"]):
@@ -106,7 +112,14 @@ class ArmCorrectionDataset(Dataset):
             0,
             len(episode["action"]) - 1,
         )
-        images = torch.from_numpy(episode["front"][indices].copy()).permute(0, 3, 1, 2)
+        image_keys = ("front", "wrist") if self.config.mode == "two_camera" else ("front",)
+        images = torch.cat(
+            [
+                torch.from_numpy(episode[key][indices].copy()).permute(0, 3, 1, 2)
+                for key in image_keys
+            ],
+            dim=1,
+        )
         images = F.interpolate(
             images.float(),
             (self.config.image_size, self.config.image_size),
@@ -116,6 +129,14 @@ class ArmCorrectionDataset(Dataset):
         vectors = np.concatenate(
             (episode["state"][indices], episode["base_action"][indices]), axis=-1
         ).astype(np.float32)
+        if self.config.task_conditioned:
+            task = str(np.asarray(episode["task"]).item()).lower()
+            task_flag = np.full(
+                (len(indices), 1),
+                float("top" in task),
+                dtype=np.float32,
+            )
+            vectors = np.concatenate((vectors, task_flag), axis=-1)
         active = int(episode["phase"][frame]) <= 1
         target = np.zeros(6, dtype=np.float32)
         if active:
@@ -139,9 +160,20 @@ def train_arm_head(
     epochs: int,
     batch_size: int,
     seed: int,
+    extra_train_roots: list[Path] | None = None,
+    task_filter: str | None = None,
 ) -> dict:
-    train_set = ArmCorrectionDataset(sorted(train_root.glob("*.npz")), config)
-    validation_set = ArmCorrectionDataset(sorted(validation_root.glob("*.npz")), config)
+    def paths(root: Path) -> list[Path]:
+        values = sorted(root.glob("*.npz"))
+        if task_filter:
+            values = [path for path in values if task_filter in path.name]
+        return values
+
+    train_paths = paths(train_root)
+    for root in extra_train_roots or []:
+        train_paths.extend(paths(root))
+    train_set = ArmCorrectionDataset(train_paths, config)
+    validation_set = ArmCorrectionDataset(paths(validation_root), config)
     labels = np.asarray(train_set.active_labels)
     positive, negative = max(1, int(labels.sum())), max(1, int((1 - labels).sum()))
     weights = np.where(labels > 0, 0.7 / positive, 0.3 / negative)
@@ -216,6 +248,98 @@ def train_arm_head(
     }
     (output / "training_metrics.json").write_text(json.dumps(report, indent=2) + "\n")
     return report
+
+
+class LearnedArmResidualPolicy:
+    """Adds a learned front-image arm residual without changing the gripper."""
+
+    def __init__(
+        self,
+        base_policy,
+        checkpoint: str | Path,
+        *,
+        arm_scale: float = 1.0,
+        gate_mode: Literal["approach", "contact", "none"] = "approach",
+    ):
+        self.base_policy = base_policy
+        if not 0.0 <= arm_scale <= 1.0:
+            raise ValueError("arm_scale must be in [0, 1]")
+        self.arm_scale = float(arm_scale)
+        if gate_mode not in ("approach", "contact", "none"):
+            raise ValueError(f"Unknown arm gate mode: {gate_mode}")
+        self.gate_mode = gate_mode
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        root = Path(checkpoint)
+        self.config = ArmHeadConfig(**json.loads((root / "config.json").read_text()))
+        self.model = TemporalArmResidualHead(self.config).to(self.device)
+        self.model.load_state_dict(torch.load(root / "model.pt", map_location=self.device))
+        self.model.eval()
+        self.history: deque[tuple[np.ndarray, np.ndarray]] = deque(
+            maxlen=self.config.history
+        )
+        self.last_residual = np.zeros(6, dtype=np.float32)
+        self.task_flag = 0.0
+
+    def reset(self, instruction: str = "", seed: int | None = None) -> None:
+        self.base_policy.reset(instruction, seed=seed)
+        self.history.clear()
+        self.last_residual.fill(0)
+        self.task_flag = float("top" in instruction.lower())
+
+    def get_action(self, obs: dict[str, np.ndarray]) -> np.ndarray:
+        from .collect_grasp_demos import _flip_libero_image, _quat_to_axis_angle
+
+        base_action = np.asarray(self.base_policy.get_action(obs), dtype=np.float32)
+        vector = np.concatenate(
+            (
+                np.asarray(obs["robot0_eef_pos"], dtype=np.float32),
+                _quat_to_axis_angle(obs["robot0_eef_quat"]),
+                np.asarray(obs["robot0_gripper_qpos"], dtype=np.float32),
+                base_action,
+            )
+        ).astype(np.float32)
+        if self.config.task_conditioned:
+            vector = np.concatenate(
+                (vector, np.asarray([self.task_flag], dtype=np.float32))
+            )
+        image = _flip_libero_image(obs["agentview_image"])
+        if self.config.mode == "two_camera":
+            image = np.concatenate(
+                (image, _flip_libero_image(obs["robot0_eye_in_hand_image"])),
+                axis=-1,
+            )
+        self.history.append((image, vector))
+        while len(self.history) < self.config.history:
+            self.history.appendleft(self.history[0])
+        images = torch.from_numpy(
+            np.stack([row[0] for row in self.history])
+        ).permute(0, 3, 1, 2)
+        images = F.interpolate(
+            images.float(),
+            (self.config.image_size, self.config.image_size),
+            mode="bilinear",
+            align_corners=False,
+        )[None].to(self.device) / 255.0
+        vectors = torch.from_numpy(
+            np.stack([row[1] for row in self.history])
+        )[None].to(self.device)
+        with torch.inference_mode():
+            residual, approach, contact = self.model(images, vectors)
+            if self.gate_mode == "approach":
+                residual = residual * torch.sigmoid(approach)[:, None]
+            elif self.gate_mode == "contact":
+                residual = residual * (1.0 - torch.sigmoid(contact))[:, None]
+        target = residual[0].cpu().numpy() * self.arm_scale
+        limits = np.asarray(self.config.limits())
+        target = np.clip(target, -limits, limits)
+        rate = self.config.rate_limit
+        target = self.last_residual + np.clip(
+            target - self.last_residual, -rate, rate
+        )
+        self.last_residual = target.astype(np.float32)
+        action = base_action.copy()
+        action[:6] = np.clip(base_action[:6] + self.last_residual, -1.0, 1.0)
+        return action
 
 
 class LearnedFrontGraspPolicy:
@@ -408,15 +532,25 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=16)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--seed", type=int, default=941)
+    parser.add_argument(
+        "--mode",
+        choices=("front", "two_camera"),
+        default="front",
+    )
+    parser.add_argument("--task-conditioned", action="store_true")
+    parser.add_argument("--task-filter")
+    parser.add_argument("--extra-train-root", type=Path, action="append", default=[])
     args = parser.parse_args()
     report = train_arm_head(
         args.train_root,
         args.validation_root,
         args.output,
-        ArmHeadConfig(),
+        ArmHeadConfig(mode=args.mode, task_conditioned=args.task_conditioned),
         epochs=args.epochs,
         batch_size=args.batch_size,
         seed=args.seed,
+        extra_train_roots=args.extra_train_root,
+        task_filter=args.task_filter,
     )
     print(json.dumps(report, indent=2))
 
